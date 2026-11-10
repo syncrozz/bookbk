@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { AcademicScheduleSlot, Room, DayOfWeek } from '../types';
-import { MALAY_DAYS } from '../utils/availabilityEngine';
+import { AcademicScheduleSlot, Room, DayOfWeek, AcademicExemption } from '../types';
+import { MALAY_DAYS, formatDateMalay } from '../utils/availabilityEngine';
 import { exportTimetableToStandardGridCSV } from '../utils/timetableCsvParser';
 import { parseTimeMinutes } from '../utils/timeSlots';
 import { ensureBookbkPrefix } from '../utils/downloadHelper';
@@ -10,7 +10,8 @@ import {
   Building, 
   Clock, 
   Lock,
-  Download
+  Download,
+  AlertCircle
 } from 'lucide-react';
 
 const DAY_ORDER: Record<string, number> = {
@@ -26,17 +27,27 @@ const DAY_ORDER: Record<string, number> = {
 interface AcademicScheduleViewProps {
   schedule: AcademicScheduleSlot[];
   rooms: Room[];
+  exemptions?: AcademicExemption[];
   onAddScheduleSlot?: (slot: Omit<AcademicScheduleSlot, 'id'>) => void;
 }
 
 export const AcademicScheduleView: React.FC<AcademicScheduleViewProps> = ({
   schedule,
   rooms,
+  exemptions = [],
   onAddScheduleSlot
 }) => {
   const [selectedDay, setSelectedDay] = useState<DayOfWeek | 'Semua'>('Khamis');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [roomFilter, setRoomFilter] = useState<string>('Semua');
+
+  const todayStr = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
+
+  const activeNow = exemptions.find(ex => ex.active && todayStr >= ex.startDate && todayStr <= ex.endDate);
+  const upcoming = !activeNow ? exemptions.find(ex => ex.active && ex.startDate > todayStr) : undefined;
 
   const handleExportCSV = () => {
     const csvContent = exportTimetableToStandardGridCSV(schedule, rooms, { includeNightSlots: true });
@@ -96,6 +107,39 @@ export const AcademicScheduleView: React.FC<AcademicScheduleViewProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* STUDY WEEK NOTICE BANNER */}
+      {activeNow && (
+        <div className="bg-amber-500 text-slate-950 p-4 rounded-2xl shadow-md border border-amber-400 flex items-start gap-3 animate-in fade-in">
+          <div className="p-2 bg-amber-600/30 rounded-xl shrink-0 text-xl font-bold">
+            📚
+          </div>
+          <div>
+            <div className="font-extrabold text-sm sm:text-base">
+              Study Week sedang berkuatkuasa: {formatDateMalay(activeNow.startDate)} hingga {formatDateMalay(activeNow.endDate)}
+            </div>
+            <p className="text-xs text-slate-900 mt-0.5">
+              Jadual di bawah tidak menghalang tempahan pada tempoh ini. Pensyarah boleh menempah ruang secara adhoc seperti biasa.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {!activeNow && upcoming && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-900 p-4 rounded-2xl shadow-xs flex items-start gap-3">
+          <div className="p-2 bg-amber-100 rounded-xl shrink-0 text-xl">
+            📅
+          </div>
+          <div>
+            <div className="font-bold text-sm">
+              Pengecualian akan bermula pada {formatDateMalay(upcoming.startDate)} ({upcoming.title})
+            </div>
+            <p className="text-xs text-amber-800 mt-0.5">
+              Tempoh pengecualian ({upcoming.startDate} hingga {upcoming.endDate}): jadual hakiki tidak akan menghalang tempahan pensyarah.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-white rounded-2xl p-6 shadow-md border border-slate-200">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-100 pb-4">

@@ -5,14 +5,18 @@ import {
   AdHocBooking, 
   InstitutionalBlock, 
   RoomCategory,
-  PurposeCategory 
+  PurposeCategory,
+  AcademicExemption
 } from '../types';
 import { verifyAdminPin } from '../lib/firebase';
 import { 
   checkRoomAvailability, 
   formatDateMalay, 
-  getMalayDayOfWeek,
-  calculateDurationText
+  getMalayDayOfWeek, 
+  calculateDurationText,
+  findActiveExemption,
+  getExemptionForDate,
+  isTimeOverlap
 } from '../utils/availabilityEngine';
 import {
   ALL_BOOKING_TIME_SLOTS,
@@ -52,6 +56,7 @@ interface RoomAvailabilityMatrixProps {
   academicSchedule: AcademicScheduleSlot[];
   adhocBookings: AdHocBooking[];
   institutionalBlocks: InstitutionalBlock[];
+  exemptions?: AcademicExemption[];
   onOpenBookingModal: (room: Room, date: string, startTime: string, endTime: string, purpose: PurposeCategory) => void;
   onViewRoomDetails: (room: Room) => void;
   isAdmin?: boolean;
@@ -66,6 +71,7 @@ export const RoomAvailabilityMatrix: React.FC<RoomAvailabilityMatrixProps> = ({
   academicSchedule,
   adhocBookings,
   institutionalBlocks,
+  exemptions = [],
   onOpenBookingModal,
   onViewRoomDetails,
   isAdmin = false,
@@ -438,6 +444,35 @@ export const RoomAvailabilityMatrix: React.FC<RoomAvailabilityMatrixProps> = ({
         </div>
       </div>
 
+      {/* STUDY WEEK ACTIVE EXEMPTION BANNER */}
+      {(() => {
+        const activeEx = getExemptionForDate(selectedDate, exemptions);
+        if (!activeEx) return null;
+        return (
+          <div className="bg-emerald-600 text-white rounded-2xl p-4 shadow-md border border-emerald-500 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="p-2 bg-emerald-700/80 rounded-xl shrink-0">
+                <span className="text-xl">📚</span>
+              </div>
+              <div>
+                <div className="font-extrabold text-sm sm:text-base flex flex-wrap items-center gap-2">
+                  <span>{activeEx.title}</span>
+                  <span className="text-[10px] bg-emerald-800 text-emerald-100 px-2 py-0.5 rounded-full font-bold border border-emerald-400/40 uppercase tracking-wide">
+                    Sedang Berkuatkuasa
+                  </span>
+                </div>
+                <p className="text-xs text-emerald-100 mt-0.5">
+                  Jadual hakiki tidak berkuatkuasa pada {formatDateMalay(activeEx.startDate)} hingga {formatDateMalay(activeEx.endDate)}. Tempahan adhoc dibenarkan.
+                </p>
+              </div>
+            </div>
+            <div className="text-xs text-emerald-100 bg-emerald-700/60 px-3 py-1.5 rounded-xl border border-emerald-500/50 self-start sm:self-auto font-medium">
+              Skop: {activeEx.scope === 'ALL_ROOMS' ? 'Semua Ruang' : activeEx.scope === 'BILIK_KULIAH' ? 'Bilik Kuliah Sahaja' : 'Ruang Terpilih'}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* MATRIX TABLE CONTAINER */}
       <div className="bg-white rounded-2xl shadow-md border border-slate-200 overflow-hidden">
         <div className="overflow-auto max-h-[calc(100vh-220px)] min-h-[460px] relative">
@@ -522,7 +557,8 @@ export const RoomAvailabilityMatrix: React.FC<RoomAvailabilityMatrixProps> = ({
                         slot.end, 
                         academicSchedule, 
                         adhocBookings, 
-                        institutionalBlocks
+                        institutionalBlocks,
+                        exemptions
                       );
 
                       const isAvail = check.status === 'AVAILABLE';
@@ -530,9 +566,33 @@ export const RoomAvailabilityMatrix: React.FC<RoomAvailabilityMatrixProps> = ({
                       const isAdhoc = check.status === 'OCCUPIED_BOOKING' || check.status === 'PENDING_BOOKING';
                       const isBlocked = check.status === 'BLOCKED';
 
+                      const dayOfWeek = getMalayDayOfWeek(selectedDate);
+                      const underlyingSlot = (isAvail && check.academicExemption)
+                        ? academicSchedule.find(s => 
+                            s.roomId === room.id && 
+                            s.dayOfWeek === dayOfWeek && 
+                            isTimeOverlap(slot.start, slot.end, s.startTime, s.endTime)
+                          )
+                        : undefined;
+
                       return (
                         <td key={slot.id} className={`p-1.5 text-center min-w-[105px] max-w-[115px] overflow-hidden ${slot.period === 'NIGHT' ? 'bg-indigo-50/20' : ''}`}>
-                          {isAvail && (
+                          {isAvail && underlyingSlot && (
+                            <button
+                              onClick={() => onOpenBookingModal(room, selectedDate, slot.start, slot.end, 'Kelas')}
+                              className="w-full h-11 rounded-xl border border-dashed border-emerald-400 bg-emerald-50/70 hover:bg-emerald-600 hover:text-white text-emerald-900 font-bold transition flex flex-col items-center justify-center p-1 group shadow-2xs cursor-pointer opacity-90 hover:opacity-100"
+                              title={`📚 Study Week (Jadual Hakiki Dikecualikan): Klik untuk Tempah ${room.code} | Slot: ${slot.start} – ${slot.end}`}
+                            >
+                              <span className="text-[9.5px] font-bold text-emerald-800 group-hover:text-white truncate max-w-full leading-tight">
+                                Hakiki (dikecualikan)
+                              </span>
+                              <span className="text-[9px] opacity-80 font-mono group-hover:text-white font-medium">
+                                {slot.start} • Sedia
+                              </span>
+                            </button>
+                          )}
+
+                          {isAvail && !underlyingSlot && (
                             <button
                               onClick={() => onOpenBookingModal(room, selectedDate, slot.start, slot.end, 'Kelas')}
                               className={`w-full h-11 rounded-xl border font-bold transition flex flex-col items-center justify-center p-1 group shadow-2xs ${

@@ -5,8 +5,10 @@ import {
   AdHocBooking, 
   InstitutionalBlock, 
   StaffUser,
-  PurposeCategory 
+  PurposeCategory,
+  AcademicExemption
 } from '../types';
+import { formatDateMalay } from '../utils/availabilityEngine';
 import { ActiveTab } from './Header';
 import { 
   CalendarDays, 
@@ -33,6 +35,7 @@ interface DashboardOverviewProps {
   adhocBookings: AdHocBooking[];
   institutionalBlocks: InstitutionalBlock[];
   staffList: StaffUser[];
+  exemptions?: AcademicExemption[];
   onNavigateTab: (tab: ActiveTab) => void;
   onOpenBookingModal: (room: Room, date: string, startTime: string, endTime: string, purpose: PurposeCategory) => void;
 }
@@ -43,6 +46,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   adhocBookings,
   institutionalBlocks,
   staffList,
+  exemptions = [],
   onNavigateTab,
   onOpenBookingModal,
 }) => {
@@ -105,6 +109,98 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* STUDY WEEK EXEMPTION CARD */}
+      {(() => {
+        if (!exemptions || exemptions.length === 0) return null;
+        const now = new Date();
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        
+        const active = exemptions.find(ex => ex.active && today >= ex.startDate && today <= ex.endDate);
+        if (active) {
+          return (
+            <div className="bg-gradient-to-r from-emerald-950 via-teal-900 to-slate-900 text-white rounded-xl p-4 border border-emerald-600 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="p-2.5 bg-emerald-600 rounded-lg text-white shrink-0 mt-0.5 sm:mt-0 shadow-sm text-lg font-bold">
+                  📚
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded bg-emerald-500/30 text-emerald-200 border border-emerald-400/30 text-[10px] font-extrabold uppercase tracking-wide">
+                      Study Week
+                    </span>
+                    <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-500 text-white">
+                      Sedang Berkuatkuasa
+                    </span>
+                  </div>
+                  <h3 className="text-sm font-bold text-white mt-1">
+                    {active.title}: {formatDateMalay(active.startDate)} hingga {formatDateMalay(active.endDate)}
+                  </h3>
+                  <p className="text-xs text-emerald-200/90 mt-0.5">
+                    Jadual hakiki tidak menghalang tempahan. Pensyarah bebas membuat tempahan adhoc pada tempoh ini.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => onNavigateTab('matrix')}
+                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <span>Semak Matriks</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          );
+        }
+
+        const upcomingList = exemptions
+          .filter(ex => ex.active && ex.startDate > today)
+          .sort((a, b) => a.startDate.localeCompare(b.startDate));
+        
+        if (upcomingList.length > 0) {
+          const nextEx = upcomingList[0];
+          const diffDays = Math.round((new Date(nextEx.startDate).getTime() - new Date(today).getTime()) / (1000 * 60 * 60 * 24));
+          if (diffDays <= 14) {
+            return (
+              <div className="bg-gradient-to-r from-emerald-950/70 via-teal-950/70 to-slate-900 text-white rounded-xl p-4 border border-emerald-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+                <div className="flex items-start sm:items-center gap-3">
+                  <div className="p-2.5 bg-emerald-700/60 rounded-lg text-white shrink-0 mt-0.5 sm:mt-0 shadow-sm text-lg font-bold">
+                    📚
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-400/20 text-[10px] font-extrabold uppercase tracking-wide">
+                        Study Week
+                      </span>
+                      <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-amber-500 text-slate-950">
+                        {diffDays} hari lagi
+                      </span>
+                    </div>
+                    <h3 className="text-sm font-bold text-white mt-1">
+                      {nextEx.title}: {formatDateMalay(nextEx.startDate)} hingga {formatDateMalay(nextEx.endDate)}
+                    </h3>
+                    <p className="text-xs text-emerald-200/80 mt-0.5">
+                      Pengecualian jadual hakiki akan bermula tidak lama lagi. Tempahan adhoc akan dibuka sepenuhnya.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => onNavigateTab('matrix')}
+                    className="px-3.5 py-1.5 bg-emerald-700/80 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  >
+                    <span>Lihat Jadual</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            );
+          }
+        }
+
+        return null;
+      })()}
 
       {/* Official Exam / Institutional Lock Announcement Banner */}
       {institutionalBlocks.length > 0 && (

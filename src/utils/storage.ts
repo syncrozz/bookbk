@@ -1,10 +1,11 @@
-import { Room, AcademicScheduleSlot, AdHocBooking, InstitutionalBlock, StaffUser } from '../types';
+import { Room, AcademicScheduleSlot, AdHocBooking, InstitutionalBlock, StaffUser, AcademicExemption } from '../types';
 import { INITIAL_ROOMS, INITIAL_ACADEMIC_SCHEDULE, INITIAL_ADHOC_BOOKINGS, INITIAL_INSTITUTIONAL_BLOCKS } from '../data/initialData';
 
 const ROOMS_KEY = 'kpmbp_rooms_v4';
 const ACADEMIC_SCHEDULE_KEY = 'kpmbp_academic_schedule_v3';
 const ADHOC_BOOKINGS_KEY = 'kpmbp_adhoc_bookings_v1';
 const INSTITUTIONAL_BLOCKS_KEY = 'kpmbp_institutional_blocks_v1';
+const ACADEMIC_EXEMPTIONS_KEY = 'kpmbp_academic_exemptions_v1';
 
 export function getStoredRooms(): Room[] {
   try {
@@ -544,5 +545,24 @@ export function saveStoredStaffUsers(staffList: StaffUser[]): void {
     localStorage.setItem(STAFF_CACHE_KEY, JSON.stringify(clean));
   } catch (err) {
     console.warn('Failed to cache staff list locally:', err);
+  }
+}
+
+export function getStoredAcademicExemptions(): AcademicExemption[] {
+  try {
+    const data = localStorage.getItem(ACADEMIC_EXEMPTIONS_KEY);
+    if (!data) return [];
+    const parsed = JSON.parse(data);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveStoredAcademicExemptions(list: AcademicExemption[]): void {
+  try {
+    localStorage.setItem(ACADEMIC_EXEMPTIONS_KEY, JSON.stringify(list));
+  } catch (err) {
+    console.warn('Failed to cache academic exemptions locally:', err);
   }
 }

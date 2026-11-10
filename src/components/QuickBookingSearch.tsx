@@ -7,14 +7,17 @@ import {
   SearchFilterParams, 
   PurposeCategory, 
   RoomCategory,
-  RoomAvailabilityCheck
+  RoomAvailabilityCheck,
+  AcademicExemption
 } from '../types';
 import { 
   checkRoomAvailability, 
   findSmartAlternatives, 
   formatDateMalay, 
   getMalayDayOfWeek,
-  calculateDurationText
+  calculateDurationText,
+  findActiveExemption,
+  getExemptionForDate
 } from '../utils/availabilityEngine';
 import {
   BOOKING_START_OPTIONS,
@@ -49,6 +52,7 @@ interface QuickBookingSearchProps {
   academicSchedule: AcademicScheduleSlot[];
   adhocBookings: AdHocBooking[];
   institutionalBlocks: InstitutionalBlock[];
+  exemptions?: AcademicExemption[];
   onOpenBookingModal: (room: Room, date: string, startTime: string, endTime: string, purpose: PurposeCategory) => void;
   onViewRoomDetails: (room: Room) => void;
 }
@@ -58,6 +62,7 @@ export const QuickBookingSearch: React.FC<QuickBookingSearchProps> = ({
   academicSchedule,
   adhocBookings,
   institutionalBlocks,
+  exemptions = [],
   onOpenBookingModal,
   onViewRoomDetails
 }) => {
@@ -115,12 +120,12 @@ export const QuickBookingSearch: React.FC<QuickBookingSearchProps> = ({
   // If specific room selected
   const targetRoom = rooms.find(r => r.id === selectedRoomId);
   const singleCheck: RoomAvailabilityCheck | null = targetRoom 
-    ? checkRoomAvailability(targetRoom, selectedDate, startTime, endTime, academicSchedule, adhocBookings, institutionalBlocks)
+    ? checkRoomAvailability(targetRoom, selectedDate, startTime, endTime, academicSchedule, adhocBookings, institutionalBlocks, exemptions)
     : null;
 
   // Smart alternatives if conflict occurs
   const smartAlternatives = (selectedRoomId !== 'ALL' && singleCheck && singleCheck.status !== 'AVAILABLE')
-    ? findSmartAlternatives(selectedRoomId, searchParams, rooms, academicSchedule, adhocBookings, institutionalBlocks)
+    ? findSmartAlternatives(selectedRoomId, searchParams, rooms, academicSchedule, adhocBookings, institutionalBlocks, exemptions)
     : null;
 
   // All rooms check if "ALL" selected or for overview list
@@ -131,7 +136,7 @@ export const QuickBookingSearch: React.FC<QuickBookingSearchProps> = ({
       if (searchParams.isAircondOnly && !r.hasAircond) return false;
       return true;
     })
-    .map(r => checkRoomAvailability(r, selectedDate, startTime, endTime, academicSchedule, adhocBookings, institutionalBlocks));
+    .map(r => checkRoomAvailability(r, selectedDate, startTime, endTime, academicSchedule, adhocBookings, institutionalBlocks, exemptions));
 
   const availableCount = allRoomsCheck.filter(c => c.status === 'AVAILABLE').length;
 
@@ -413,9 +418,17 @@ export const QuickBookingSearch: React.FC<QuickBookingSearchProps> = ({
             <div className="bg-emerald-50 border-2 border-emerald-500 rounded-2xl p-6 shadow-lg relative overflow-hidden">
               <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
                 <div className="space-y-2">
-                  <div className="inline-flex items-center gap-2 bg-emerald-600 text-white px-3 py-1 rounded-full text-xs font-bold shadow-sm">
-                    <CheckCircle2 className="w-4 h-4" />
-                    RUANG TERSEDIA (AVAILABLE)
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="inline-flex items-center gap-2 bg-emerald-600 text-white px-3 py-1 rounded-full text-xs font-bold shadow-sm">
+                      <CheckCircle2 className="w-4 h-4" />
+                      RUANG TERSEDIA (AVAILABLE)
+                    </div>
+                    {singleCheck.academicExemption && (
+                      <div className="inline-flex items-center gap-1.5 bg-emerald-100 text-emerald-900 border border-emerald-300 px-3 py-1 rounded-full text-xs font-bold shadow-xs">
+                        <span>📚</span>
+                        <span>Dikecualikan daripada jadual hakiki (Study Week)</span>
+                      </div>
+                    )}
                   </div>
                   <h3 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
                     {targetRoom.name === targetRoom.code ? targetRoom.name : `${targetRoom.name} (${targetRoom.code})`}
@@ -515,9 +528,10 @@ export const QuickBookingSearch: React.FC<QuickBookingSearchProps> = ({
                           selectedDate,
                           startTime,
                           endTime,
-                          adhocBookings,
                           academicSchedule,
-                          institutionalBlocks
+                          adhocBookings,
+                          institutionalBlocks,
+                          exemptions
                         );
                         return (
                           <div

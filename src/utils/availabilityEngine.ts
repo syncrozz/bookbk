@@ -5,7 +5,8 @@ import {
   InstitutionalBlock, 
   RoomAvailabilityCheck, 
   DayOfWeek,
-  SearchFilterParams 
+  SearchFilterParams,
+  AcademicExemption
 } from '../types';
 import {
   parseTimeMinutes,
@@ -61,6 +62,144 @@ export function isTimeOverlap(startA: string, endA: string, startB: string, endB
   return minStartA < minEndB && minEndA > minStartB;
 }
 
+/**
+ * Mencari pengecualian akademik aktif yang berkuatkuasa untuk bilik dan tarikh yang diberikan.
+ * Syarat padanan:
+ * - ex.active === true
+ * - date >= ex.startDate && date <= ex.endDate
+ * - skop sepadan: ALL_ROOMS / BILIK_KULIAH / SELECTED
+ */
+export function findActiveExemption(
+  room: Room,
+  date: string,
+  exemptions: AcademicExemption[] = []
+): AcademicExemption | undefined {
+  if (!exemptions || exemptions.length === 0 || !date) return undefined;
+  return exemptions.find(ex => {
+    if (!ex.active) return false;
+    if (date < ex.startDate || date > ex.endDate) return false;
+    if (ex.scope === 'ALL_ROOMS') return true;
+    if (ex.scope === 'BILIK_KULIAH') return room.category === 'Bilik Kuliah';
+    if (ex.scope === 'SELECTED') return !!(ex.roomIds && ex.roomIds.includes(room.id));
+    return false;
+  });
+}
+
+/**
+ * Mengembalikan pengecualian aktif pertama untuk tarikh tertentu (tanpa mengira bilik).
+ * Digunakan untuk paparan sepanduk maklumat am.
+ */
+export function getExemptionForDate(
+  date: string,
+  exemptions: AcademicExemption[] = []
+): AcademicExemption | undefined {
+  if (!exemptions || exemptions.length === 0 || !date) return undefined;
+  return exemptions.find(ex => ex.active && date >= ex.startDate && date <= ex.endDate);
+}
+
+/**
+ * Mengira bilangan slot jadual hakiki yang terjejas/dilangkau oleh pengecualian.
+ */
+export function countAffectedAcademicSlots(
+  exemption: AcademicExemption,
+  rooms: Room[],
+  schedule: AcademicScheduleSlot[]
+): number {
+  if (!exemption.startDate || !exemption.endDate || exemption.endDate < exemption.startDate) return 0;
+  
+  const targetRoomIds = new Set<string>();
+  for (const r of rooms) {
+    if (exemption.scope === 'ALL_ROOMS') {
+      targetRoomIds.add(r.id);
+    } else if (exemption.scope === 'BILIK_KULIAH') {
+      if (r.category === 'Bilik Kuliah') targetRoomIds.add(r.id);
+    } else if (exemption.scope === 'SELECTED') {
+      if (exemption.roomIds && exemption.roomIds.includes(r.id)) targetRoomIds.add(r.id);
+    }
+  }
+
+  if (targetRoomIds.size === 0) return 0;
+
+  let totalSlots = 0;
+  const start = new Date(exemption.startDate);
+  const end = new Date(exemption.endDate);
+
+  const curr = new Date(start);
+  while (curr <= end) {
+    const y = curr.getFullYear();
+    const m = String(curr.getMonth() + 1).padStart(2, '0');
+    const d = String(curr.getDate()).padStart(2, '0');
+    const dateStr = `${y}-${m}-${d}`;
+    const dayOfWeek = getMalayDayOfWeek(dateStr);
+
+    const slotsForDay = schedule.filter(s => s.dayOfWeek === dayOfWeek && targetRoomIds.has(s.roomId));
+    totalSlots += slotsForDay.length;
+
+    curr.setDate(curr.getDate() + 1);
+  }
+
+  return totalSlots;
+}
+
+/**
+ * Validasi input pengecualian akademik untuk borang pentadbir.
+ */
+export function validateExemptionInput(
+  input: Partial<AcademicExemption>,
+  existing: AcademicExemption[] = []
+): { isValid: boolean; errors: string[]; warnings: string[] } {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  const title = (input.title || '').trim();
+  if (!title) {
+    errors.push('Tajuk pengecualian diperlukan.');
+  }
+
+  const startDate = input.startDate || '';
+  const endDate = input.endDate || '';
+
+  if (!startDate || !endDate) {
+    errors.push('Tarikh mula dan tarikh tamat diperlukan.');
+  } else if (endDate < startDate) {
+    errors.push('Tarikh tamat tidak boleh mendahului tarikh mula.');
+  } else {
+    const startMs = new Date(startDate).getTime();
+    const endMs = new Date(endDate).getTime();
+    const diffDays = Math.round((endMs - startMs) / (1000 * 60 * 60 * 24)) + 1;
+    if (diffDays > 31) {
+      errors.push('Tempoh pengecualian tidak boleh melebihi 31 hari.');
+    }
+  }
+
+  if (input.scope === 'SELECTED' && (!input.roomIds || input.roomIds.length === 0)) {
+    errors.push('Sila pilih sekurang-kurangnya satu bilik/ruang untuk skop bilik tertentu.');
+  }
+
+  // Warnings
+  if (startDate && endDate && endDate >= startDate) {
+    for (const ex of existing) {
+      if (input.id && ex.id === input.id) continue;
+      if (!ex.active) continue;
+      if (startDate <= ex.endDate && endDate >= ex.startDate) {
+        warnings.push(`Tempoh ini bertindih dengan pengecualian aktif sedia ada: "${ex.title}" (${ex.startDate} hingga ${ex.endDate}).`);
+      }
+    }
+
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    if (startDate < todayStr) {
+      warnings.push(`Tarikh mula (${startDate}) adalah tarikh yang sudah berlalu.`);
+    }
+  }
+
+  return {
+    isValid: errors.length === 0,
+    errors,
+    warnings
+  };
+}
+
 export function checkRoomAvailability(
   room: Room,
   date: string,
@@ -68,8 +207,11 @@ export function checkRoomAvailability(
   endTime: string,
   academicSchedule: AcademicScheduleSlot[],
   adhocBookings: AdHocBooking[],
-  institutionalBlocks: InstitutionalBlock[]
+  institutionalBlocks: InstitutionalBlock[],
+  exemptions: AcademicExemption[] = []
 ): RoomAvailabilityCheck {
+  const activeExemption = findActiveExemption(room, date, exemptions);
+
   // Layer 0: Check Time Range Validation & Night Limit (hard ceiling 23:00)
   const timeVal = validateBookingTime(startTime, endTime);
   if (!timeVal.isValid) {
@@ -77,6 +219,7 @@ export function checkRoomAvailability(
       roomId: room.id,
       room,
       status: 'BLOCKED',
+      academicExemption: activeExemption,
       conflictReason: timeVal.errorMsg || 'Waktu tempahan tidak sah.'
     };
   }
@@ -87,6 +230,7 @@ export function checkRoomAvailability(
       roomId: room.id,
       room,
       status: 'BLOCKED',
+      academicExemption: activeExemption,
       conflictReason: `Ruang ${room.code} (${room.name}) tidak dibuka untuk tempahan waktu malam.`
     };
   }
@@ -111,28 +255,31 @@ export function checkRoomAvailability(
       room,
       status: 'BLOCKED',
       institutionalBlock: block,
+      academicExemption: activeExemption,
       conflictReason: isExam
         ? `🔒 Peperiksaan Akhir Rasmi Kolej: ${block.title}${rangeText} (${block.createdBy})`
         : `⚫ Sekatan Acara Institusi: ${block.title}${rangeText} (${block.createdBy})`
     };
   }
 
-  // Layer 1: Check Academic Schedule Timetable
-  const dayOfWeek = getMalayDayOfWeek(date);
-  const acadSlot = academicSchedule.find(s => 
-    s.roomId === room.id && 
-    s.dayOfWeek === dayOfWeek && 
-    isTimeOverlap(startTime, endTime, s.startTime, s.endTime)
-  );
+  // Layer 1: Check Academic Schedule Timetable (Dilangkau sekiranya pengecualian aktif berkuatkuasa)
+  if (!activeExemption) {
+    const dayOfWeek = getMalayDayOfWeek(date);
+    const acadSlot = academicSchedule.find(s => 
+      s.roomId === room.id && 
+      s.dayOfWeek === dayOfWeek && 
+      isTimeOverlap(startTime, endTime, s.startTime, s.endTime)
+    );
 
-  if (acadSlot) {
-    return {
-      roomId: room.id,
-      room,
-      status: 'OCCUPIED_ACADEMIC',
-      academicSlot: acadSlot,
-      conflictReason: `Jadual Akademik: ${acadSlot.courseCode} ${acadSlot.courseName} [${acadSlot.className}] oleh ${acadSlot.lecturerName}`
-    };
+    if (acadSlot) {
+      return {
+        roomId: room.id,
+        room,
+        status: 'OCCUPIED_ACADEMIC',
+        academicSlot: acadSlot,
+        conflictReason: `Jadual Akademik: ${acadSlot.courseCode} ${acadSlot.courseName} [${acadSlot.className}] oleh ${acadSlot.lecturerName}`
+      };
+    }
   }
 
   // Layer 2: Check Existing Ad-hoc Bookings
@@ -150,6 +297,7 @@ export function checkRoomAvailability(
       room,
       status: isPending ? 'PENDING_BOOKING' : 'OCCUPIED_BOOKING',
       existingBooking,
+      academicExemption: activeExemption,
       conflictReason: isPending 
         ? `Permohonan Menunggu Kelulusan: ${existingBooking.title} (${existingBooking.applicantName})`
         : `Tempahan Disahkan: ${existingBooking.title} (${existingBooking.applicantName})`
@@ -160,7 +308,8 @@ export function checkRoomAvailability(
   return {
     roomId: room.id,
     room,
-    status: 'AVAILABLE'
+    status: 'AVAILABLE',
+    academicExemption: activeExemption
   };
 }
 
@@ -170,7 +319,8 @@ export function findSmartAlternatives(
   rooms: Room[],
   academicSchedule: AcademicScheduleSlot[],
   adhocBookings: AdHocBooking[],
-  institutionalBlocks: InstitutionalBlock[]
+  institutionalBlocks: InstitutionalBlock[],
+  exemptions: AcademicExemption[] = []
 ): {
   alternativeRooms: RoomAvailabilityCheck[];
   alternativeSlots: { startTime: string; endTime: string; status: 'AVAILABLE'; period: TimeSlotPeriod }[];
@@ -193,7 +343,7 @@ export function findSmartAlternatives(
   const availableAlternatives: RoomAvailabilityCheck[] = [];
 
   for (const r of candidateRooms) {
-    const check = checkRoomAvailability(r, date, startTime, endTime, academicSchedule, adhocBookings, institutionalBlocks);
+    const check = checkRoomAvailability(r, date, startTime, endTime, academicSchedule, adhocBookings, institutionalBlocks, exemptions);
     if (check.status === 'AVAILABLE') {
       availableAlternatives.push(check);
     }
@@ -207,7 +357,6 @@ export function findSmartAlternatives(
   });
 
   // 2. Find alternative time slots on the SAME target room if user wants to adjust time
-  // Reusable Single Source of Truth: Prioritize night slots if searching night, day slots if searching day
   const targetRoom = rooms.find(r => r.id === targetRoomId);
   const alternativeSlots: { startTime: string; endTime: string; status: 'AVAILABLE'; period: TimeSlotPeriod }[] = [];
 
@@ -225,7 +374,8 @@ export function findSmartAlternatives(
         slot.end, 
         academicSchedule, 
         adhocBookings, 
-        institutionalBlocks
+        institutionalBlocks,
+        exemptions
       );
       if (slotCheck.status === 'AVAILABLE') {
         alternativeSlots.push({
@@ -246,6 +396,7 @@ export function findSmartAlternatives(
 
 export function formatWhatsAppMessage(booking: AdHocBooking): string {
   const statusEmoji = booking.status === 'CONFIRMED' ? '🟢 CONFIRMED' : booking.status === 'REJECTED' ? '🔴 REJECTED' : '🟡 PENDING';
+  const exemptionLine = booking.academicExemptionId ? '\n📚 *Nota:* Jadual hakiki dikecualikan (Study Week)' : '';
   const text = `*TEMPAHAN RUANG*
 ━━━━━━━━━━━━━━━━━━━━━
 📌 *ID Tempahan:* ${booking.id}
@@ -254,7 +405,7 @@ export function formatWhatsAppMessage(booking: AdHocBooking): string {
 🕐 *Masa:* ${booking.startTime} - ${booking.endTime}
 👤 *Pemohon:* ${booking.applicantName} (${booking.applicantRole})
 🎯 *Tujuan:* ${booking.purposeCategory} - ${booking.title}
-⚡ *Status:* ${statusEmoji}
+⚡ *Status:* ${statusEmoji}${exemptionLine}
 ━━━━━━━━━━━━━━━━━━━━━
 _Mesej ini dijana secara automatik_`;
 

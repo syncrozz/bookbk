@@ -19,7 +19,7 @@ import {
   setLogLevel,
   serverTimestamp
 } from 'firebase/firestore';
-import { AdHocBooking, Room, AcademicScheduleSlot, InstitutionalBlock, StaffUser } from '../types';
+import { AdHocBooking, Room, AcademicScheduleSlot, InstitutionalBlock, StaffUser, AcademicExemption } from '../types';
 import { INITIAL_ROOMS, INITIAL_ACADEMIC_SCHEDULE, INITIAL_ADHOC_BOOKINGS, INITIAL_INSTITUTIONAL_BLOCKS } from '../data/initialData';
 import { INITIAL_STAFF_DATA } from '../data/staffData';
 import { 
@@ -36,7 +36,9 @@ import {
   dequeuePendingBooking,
   updatePendingBookingInQueue,
   updateStoredBooking,
-  mergeCloudBookingsWithPendingQueue
+  mergeCloudBookingsWithPendingQueue,
+  getStoredAcademicExemptions,
+  saveStoredAcademicExemptions
 } from '../utils/storage';
 import { generateBookingIdempotencyKey, isSlotOverlapping } from '../utils/idempotency';
 import { matchStaffByEmail } from '../utils/staff-matcher';
@@ -1856,6 +1858,68 @@ export async function saveAppVersionToCloud(label: string): Promise<void> {
       throw new Error('Akses ditolak: Hanya Pentadbir (Admin) yang disahkan boleh menyunting versi.');
     }
     throw new Error(err?.message || 'Gagal menyimpan versi ke Cloud Firestore.');
+  }
+}
+
+export const ACADEMIC_EXEMPTIONS_DOC_ID = 'academicExemptions';
+
+/**
+ * Berlangganan dokumen metadata/academicExemptions secara real-time.
+ * Data disimpan dalam medan 'items' (tatasusunan AcademicExemption).
+ * Fallback lancar ke localStorage sekiranya luar talian atau ralat.
+ */
+export function subscribeToAcademicExemptions(onUpdate: (list: AcademicExemption[]) => void): () => void {
+  try {
+    const docRef = doc(db, METADATA_COLLECTION, ACADEMIC_EXEMPTIONS_DOC_ID);
+    const unsubscribe = onSnapshot(
+      docRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          recordSnapshotSuccess(METADATA_COLLECTION);
+          const data = snapshot.data();
+          const items = Array.isArray(data?.items) ? data.items : [];
+          saveStoredAcademicExemptions(items);
+          onUpdate(items);
+        } else {
+          recordSnapshotSuccess(METADATA_COLLECTION);
+          const local = getStoredAcademicExemptions();
+          onUpdate(local);
+        }
+      },
+      (error) => {
+        reportSnapshotFallbackError(METADATA_COLLECTION, error);
+        console.warn('subscribeToAcademicExemptions fallback to local:', error);
+        onUpdate(getStoredAcademicExemptions());
+      }
+    );
+    return unsubscribe;
+  } catch (err) {
+    reportSnapshotFallbackError(METADATA_COLLECTION, err);
+    console.warn('subscribeToAcademicExemptions setup error:', err);
+    onUpdate(getStoredAcademicExemptions());
+    return () => {};
+  }
+}
+
+/**
+ * Menyimpan senarai pengecualian akademik ke dokumen metadata/academicExemptions di Firestore (khusus admin).
+ */
+export async function saveAcademicExemptionsToCloud(list: AcademicExemption[]): Promise<void> {
+  const docRef = doc(db, METADATA_COLLECTION, ACADEMIC_EXEMPTIONS_DOC_ID);
+  saveStoredAcademicExemptions(list);
+  try {
+    await setDoc(docRef, {
+      items: list,
+      updatedAt: serverTimestamp(),
+      updatedBy: 'admin',
+    }, { merge: true });
+  } catch (err: any) {
+    console.error('saveAcademicExemptionsToCloud failed:', err);
+    const code = err?.code || '';
+    if (code === 'permission-denied') {
+      throw new Error('Akses ditolak: Hanya Pentadbir (Admin) yang disahkan boleh menyunting pengecualian jadual hakiki.');
+    }
+    throw new Error(err?.message || 'Gagal menyimpan pengecualian ke Cloud Firestore (disimpan secara tempatan).');
   }
 }
 
