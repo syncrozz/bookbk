@@ -2,7 +2,6 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { serverAuthVault, createStaffFirebaseCustomToken } from './src/server/auth-service';
-import { APP_VERSION } from './src/config/version';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,60 +21,6 @@ async function startServer() {
       service: 'KPMBP SmartHub API Engine',
       security: 'scrypt-N16384-r8-p1',
       timestamp: new Date().toISOString(),
-    });
-  });
-
-  // Dynamic Live Version Endpoint (Auto-syncs with latest GitHub repository commits)
-  let cachedVersion = APP_VERSION;
-  let cachedVersionLabel = `Versi ${APP_VERSION}`;
-  let lastVersionFetchTime = 0;
-  const VERSION_CACHE_TTL_MS = 60 * 1000; // 60 saat cache
-
-  app.get('/api/version', async (_req, res) => {
-    const now = Date.now();
-    if (now - lastVersionFetchTime < VERSION_CACHE_TTL_MS) {
-      return res.json({
-        version: cachedVersion,
-        label: cachedVersionLabel,
-        cached: true,
-      });
-    }
-
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 2500);
-      const ghRes = await fetch('https://api.github.com/repos/syncrozz/roombooking/commits?per_page=1', {
-        headers: { 'User-Agent': 'BookBK-SmartHub-App' },
-        signal: controller.signal,
-      });
-      clearTimeout(timer);
-
-      if (ghRes.ok) {
-        const data: any = await ghRes.json();
-        const msg = data?.[0]?.commit?.message || '';
-        const match = msg.match(/(?:adjustment|versi|version|release|tag)\s+([0-9]{1,2}\.[0-9]{1,2}(?:\s+[vV][0-9]+)?)/i) ||
-                      msg.match(/([0-9]{1,2}\.[0-9]{1,2}\s+[vV][0-9]+)/i);
-        if (match && match[1]) {
-          cachedVersion = match[1].trim();
-          cachedVersionLabel = `Versi ${cachedVersion}`;
-          lastVersionFetchTime = now;
-          return res.json({
-            version: cachedVersion,
-            label: cachedVersionLabel,
-            source: 'github',
-            commitMessage: msg,
-          });
-        }
-      }
-    } catch {
-      // Fallback gracefully
-    }
-
-    lastVersionFetchTime = now;
-    return res.json({
-      version: cachedVersion,
-      label: cachedVersionLabel,
-      source: 'local',
     });
   });
 

@@ -10,7 +10,8 @@ import {
   AdHocBooking, 
   InstitutionalBlock, 
   PurposeCategory,
-  StaffUser
+  StaffUser,
+  AcademicExemption
 } from './types';
 import { 
   getStoredRooms, 
@@ -21,6 +22,8 @@ import {
   saveStoredAdHocBookings, 
   getStoredInstitutionalBlocks, 
   saveStoredInstitutionalBlocks, 
+  getStoredAcademicExemptions,
+  saveStoredAcademicExemptions,
   resetToDefaults, 
   purgeAllDemoDataLocal,
   generateBookingId,
@@ -39,6 +42,7 @@ import {
   mergeCloudBookingsWithPendingQueue
 } from './utils/storage';
 import { matchStaffByEmail } from './utils/staff-matcher';
+import { findActiveExemption } from './utils/availabilityEngine';
 import { 
   subscribeToBookings, 
   subscribeToBlocks, 
@@ -69,7 +73,9 @@ import {
   syncPendingBookingsQueue,
   saveScheduleSlotToCloud,
   refreshStaffUsersFromCloud,
-  verifyAdminPin
+  verifyAdminPin,
+  subscribeToAcademicExemptions,
+  saveAcademicExemptionsToCloud
 } from './lib/firebase';
 import { INITIAL_STAFF_DATA } from './data/staffData';
 
@@ -86,7 +92,6 @@ import { QRCodeModal } from './components/QRCodeModal';
 import { SupportModal } from './components/SupportModal';
 import { SetPinModal } from './components/SetPinModal';
 import { OfflineFallbackBanner } from './components/OfflineFallbackBanner';
-import { APP_VERSION_LABEL } from './config/version';
 
 import { Building2, Shield, Heart, Sparkles, CheckCircle2, Lock, X, KeyRound, ShieldCheck, AlertCircle, AlertTriangle } from 'lucide-react';
 
@@ -120,22 +125,6 @@ export default function App() {
   });
 
   const [isSupportOpen, setIsSupportOpen] = useState<boolean>(false);
-  const [liveVersionLabel, setLiveVersionLabel] = useState<string>(APP_VERSION_LABEL);
-
-  useEffect(() => {
-    let isMounted = true;
-    fetch('/api/version')
-      .then((res) => res.json())
-      .then((data) => {
-        if (isMounted && data?.label) {
-          setLiveVersionLabel(data.label);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      isMounted = false;
-    };
-  }, []);
 
   // Admin PIN verification state
   const [showAdminPinModal, setShowAdminPinModal] = useState<boolean>(false);
@@ -215,6 +204,7 @@ export default function App() {
   const [academicSchedule, setAcademicSchedule] = useState<AcademicScheduleSlot[]>([]);
   const [adhocBookings, setAdhocBookings] = useState<AdHocBooking[]>([]);
   const [institutionalBlocks, setInstitutionalBlocks] = useState<InstitutionalBlock[]>([]);
+  const [academicExemptions, setAcademicExemptions] = useState<AcademicExemption[]>(() => getStoredAcademicExemptions());
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>(() => {
     const cached = getStoredStaffUsers();
     if (cached && cached.length > 0) {
@@ -451,6 +441,12 @@ export default function App() {
       }
     });
 
+    const unsubExemptions = subscribeToAcademicExemptions((cloudExemptions) => {
+      if (isCancelled) return;
+      setAcademicExemptions(cloudExemptions);
+      saveStoredAcademicExemptions(cloudExemptions);
+    });
+
     return () => {
       isCancelled = true;
       unsubStaff();
@@ -458,6 +454,7 @@ export default function App() {
       unsubBlocks();
       unsubSchedule();
       unsubRooms();
+      unsubExemptions();
     };
   }, [retryListenerTrigger]);
 
@@ -516,12 +513,16 @@ export default function App() {
       const item = dataList[i];
       const baseId = generateBookingId();
       const newId = dataList.length > 1 ? `${baseId}-D${i + 1}` : baseId;
+      const targetRoom = rooms.find(r => r.id === item.roomId);
+      const activeEx = targetRoom ? findActiveExemption(targetRoom, item.date, academicExemptions) : undefined;
+      const exemptionId = item.academicExemptionId || activeEx?.id;
 
       if (isCurrentlyOffline) {
         // SES v4.5: Offline bookings MUST remain PENDING until Firestore confirms the write
         const pendingBooking: AdHocBooking = {
           ...item,
           id: newId,
+          ...(exemptionId ? { academicExemptionId: exemptionId } : {}),
           status: 'PENDING',
           syncStatus: 'pending_sync',
           createdAt: nowIso
@@ -533,6 +534,7 @@ export default function App() {
         const candidateBooking: AdHocBooking = {
           ...item,
           id: newId,
+          ...(exemptionId ? { academicExemptionId: exemptionId } : {}),
           status: 'CONFIRMED',
           syncStatus: 'synced',
           syncedAt: nowIso,
@@ -550,6 +552,7 @@ export default function App() {
             const failedBooking: AdHocBooking = {
               ...item,
               id: newId,
+              ...(exemptionId ? { academicExemptionId: exemptionId } : {}),
               status: 'PENDING',
               syncStatus: 'sync_failed',
               syncError: res.error || 'Gagal menyimpan ke Cloud Firestore',
@@ -562,6 +565,7 @@ export default function App() {
           const failedBooking: AdHocBooking = {
             ...item,
             id: newId,
+            ...(exemptionId ? { academicExemptionId: exemptionId } : {}),
             status: 'PENDING',
             syncStatus: 'sync_failed',
             syncError: err?.message || 'Ralat sambungan Cloud',
@@ -814,6 +818,19 @@ export default function App() {
     } catch (err) {
       console.error('Error clearing schedule from cloud:', err);
       showToast(`🟢 Data jadual dibersihkan secara tempatan.`);
+    }
+  };
+
+  // Save / Update Academic Exemptions (Study Week)
+  const handleSaveAcademicExemptions = async (newExemptions: AcademicExemption[]) => {
+    setAcademicExemptions(newExemptions);
+    saveStoredAcademicExemptions(newExemptions);
+    try {
+      await saveAcademicExemptionsToCloud(newExemptions);
+      showToast('🟢 Pengecualian jadual hakiki berjaya diselaraskan ke Cloud.');
+    } catch (err: any) {
+      console.error('Error saving exemptions to cloud:', err);
+      showToast('🟡 Pengecualian jadual hakiki disimpan secara tempatan.');
     }
   };
 
@@ -1079,6 +1096,7 @@ export default function App() {
               adhocBookings={adhocBookings}
               institutionalBlocks={institutionalBlocks}
               staffList={staffUsers}
+              exemptions={academicExemptions}
               onNavigateTab={handleSelectTab}
               onOpenBookingModal={handleOpenBookingModal}
             />
@@ -1090,6 +1108,7 @@ export default function App() {
               academicSchedule={academicSchedule}
               adhocBookings={adhocBookings}
               institutionalBlocks={institutionalBlocks}
+              exemptions={academicExemptions}
               onOpenBookingModal={handleOpenBookingModal}
               onViewRoomDetails={(room) => {
                 setActiveTab('directory');
@@ -1109,6 +1128,7 @@ export default function App() {
             <AcademicScheduleView
               schedule={academicSchedule}
               rooms={rooms}
+              exemptions={academicExemptions}
             />
           )}
 
@@ -1137,6 +1157,7 @@ export default function App() {
               staffList={staffUsers}
               academicSchedule={academicSchedule}
               institutionalBlocks={institutionalBlocks}
+              academicExemptions={academicExemptions}
               onApproveBooking={handleApproveBooking}
               onRejectBooking={handleRejectBooking}
               onResetData={handleResetData}
@@ -1154,6 +1175,7 @@ export default function App() {
               onSyncBookings={handleSyncBookings}
               onNavigateTab={handleSelectTab}
               onRefreshStaffFromCloud={handleRefreshStaffFromCloud}
+              onSaveAcademicExemptions={handleSaveAcademicExemptions}
             />
           )}
         </main>
@@ -1190,18 +1212,6 @@ export default function App() {
               </a>
             </div>
 
-            {/* Penanda Versi Keluaran */}
-            <div className="flex items-center justify-center">
-              <span
-                id="footer-version-tag"
-                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-800/90 border border-slate-700/60 text-slate-300 text-[11px] font-medium tracking-tight shadow-xs select-none"
-                title={`Keluaran Semasa: ${liveVersionLabel}`}
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
-                <span>{liveVersionLabel}</span>
-              </span>
-            </div>
-
             <div>
               <button
                 type="button"
@@ -1236,6 +1246,7 @@ export default function App() {
           academicSchedule={academicSchedule}
           adhocBookings={adhocBookings}
           institutionalBlocks={institutionalBlocks}
+          exemptions={academicExemptions}
           isAdmin={isAdminUnlocked}
           isFallbackMode={connectionStatus.status === 'fallback'}
           onClose={() => setBookingModalInfo(null)}

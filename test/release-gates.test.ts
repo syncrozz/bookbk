@@ -13,15 +13,28 @@ import {
   ServerRateLimiter,
 } from '../src/server/auth-service';
 import { verifyStaffCredentials, verifyStaffCredentialsLocally } from '../src/lib/firebase';
-import { AdHocBooking, StaffUser } from '../src/types';
+import { 
+  AdHocBooking, 
+  StaffUser, 
+  Room, 
+  AcademicScheduleSlot, 
+  InstitutionalBlock, 
+  AcademicExemption 
+} from '../src/types';
+import { 
+  checkRoomAvailability, 
+  findActiveExemption, 
+  validateExemptionInput, 
+  countAffectedAcademicSlots 
+} from '../src/utils/availabilityEngine';
 
 async function runAllGateTests() {
   console.log('========================================================================');
-  console.log('SYNCROZZ SES v4.5 — 5 BLOCKING RELEASE GATES & CREDENTIAL SECURITY AUDIT');
+  console.log('SYNCROZZ SES v4.5 — 6 BLOCKING RELEASE GATES & CREDENTIAL SECURITY AUDIT');
   console.log('========================================================================\n');
 
   let passedGates = 0;
-  const totalGates = 5;
+  const totalGates = 6;
 
   // -------------------------------------------------------------
   // GATE 1: Idempotency keys with safe retry handling
@@ -432,6 +445,427 @@ async function runAllGateTests() {
     passedGates++;
   } catch (err) {
     console.error('  ✘ Gate 5 FAILED:', err);
+  }
+
+  // -------------------------------------------------------------
+  // GATE 6: Tempoh Pengecualian Jadual Hakiki (Study Week)
+  // -------------------------------------------------------------
+  try {
+    console.log('▶ [Gate 6] Testing Academic Exemptions (Study Week) Availability Engine & Validation...');
+
+    // Mock rooms
+    const roomBK07: Room = {
+      id: 'BK07',
+      code: 'BK07',
+      name: 'Bilik Kuliah 07',
+      category: 'Bilik Kuliah',
+      capacity: 35,
+      level: 'Level 1',
+      block: 'Blok A',
+      facilities: ['Projektor']
+    };
+
+    const roomBK01: Room = {
+      id: 'BK01',
+      code: 'BK01',
+      name: 'Bilik Kuliah 01',
+      category: 'Bilik Kuliah',
+      capacity: 35,
+      level: 'Level 1',
+      block: 'Blok A',
+      facilities: ['Projektor']
+    };
+
+    const roomLab: Room = {
+      id: 'MAKMAL_ALFA',
+      code: 'MAKMAL_ALFA',
+      name: 'Makmal Komputer Alfa',
+      category: 'Makmal Komputer',
+      capacity: 30,
+      level: 'Level 2',
+      block: 'Blok B',
+      facilities: ['30 PC']
+    };
+
+    // Tuesday slot (Selasa): 2026-11-03 is Tuesday
+    const acadSlotTuesday: AcademicScheduleSlot = {
+      id: 'SCH-MAT111',
+      roomId: 'BK07',
+      dayOfWeek: 'Selasa',
+      startTime: '09:00',
+      endTime: '12:00',
+      courseCode: 'MAT111',
+      courseName: 'Matematik Komputasi',
+      className: 'DIT 1A',
+      lecturerName: 'Dr. Zulkifli',
+      department: 'Jabatan Sains Komputer'
+    };
+
+    // Sunday slot (Ahad) & Monday slot (Isnin) for boundary tests
+    const acadSlotSunday: AcademicScheduleSlot = {
+      id: 'SCH-SUN-BK07',
+      roomId: 'BK07',
+      dayOfWeek: 'Ahad',
+      startTime: '09:00',
+      endTime: '11:00',
+      courseCode: 'ISL101',
+      courseName: 'Pendidikan Islam',
+      className: 'DIA 2B',
+      lecturerName: 'Ustaz Ahmad',
+      department: 'Jabatan Pengajian Islam'
+    };
+
+    const acadSlotMonday: AcademicScheduleSlot = {
+      id: 'SCH-MON-BK07',
+      roomId: 'BK07',
+      dayOfWeek: 'Isnin',
+      startTime: '09:00',
+      endTime: '11:00',
+      courseCode: 'BAH102',
+      courseName: 'Bahasa Melayu Komunikasi',
+      className: 'DBA 3C',
+      lecturerName: 'Pn. Siti',
+      department: 'Jabatan Bahasa'
+    };
+
+    const allSlots = [acadSlotTuesday, acadSlotSunday, acadSlotMonday];
+
+    // Exemption: 2 Nov 2026 (Monday) to 8 Nov 2026 (Sunday)
+    const exStudyWeek: AcademicExemption = {
+      id: 'EX-20261102-001',
+      title: 'Study Week Semester Nov 2026',
+      startDate: '2026-11-02',
+      endDate: '2026-11-08',
+      scope: 'BILIK_KULIAH',
+      active: true,
+      createdBy: 'Admin KPMBP',
+      createdAt: '2026-10-30T00:00:00Z'
+    };
+
+    // 1. Outside exemption vs inside active exemption
+    // 2026-10-27 is previous Tuesday (outside exemption)
+    const checkOutside = checkRoomAvailability(
+      roomBK07,
+      '2026-10-27',
+      '09:00',
+      '12:00',
+      allSlots,
+      [],
+      [],
+      [exStudyWeek]
+    );
+    assert.equal(checkOutside.status, 'OCCUPIED_ACADEMIC', 'Tuesday outside exemption period must be OCCUPIED_ACADEMIC');
+
+    // 2026-11-03 is Tuesday inside active exemption
+    const checkInside = checkRoomAvailability(
+      roomBK07,
+      '2026-11-03',
+      '09:00',
+      '12:00',
+      allSlots,
+      [],
+      [],
+      [exStudyWeek]
+    );
+    assert.equal(checkInside.status, 'AVAILABLE', 'Tuesday inside active study week exemption must be AVAILABLE');
+    assert.ok(checkInside.academicExemption, 'Result must include academicExemption object');
+    assert.equal(checkInside.academicExemption?.id, exStudyWeek.id, 'academicExemption id must match active exemption');
+
+    // 2. Inactive exemption (active: false)
+    const exInactive: AcademicExemption = { ...exStudyWeek, id: 'EX-INACTIVE', active: false };
+    const checkInactive = checkRoomAvailability(
+      roomBK07,
+      '2026-11-03',
+      '09:00',
+      '12:00',
+      allSlots,
+      [],
+      [],
+      [exInactive]
+    );
+    assert.equal(checkInactive.status, 'OCCUPIED_ACADEMIC', 'Inactive exemption (active: false) must not skip academic schedule');
+
+    // 3. Boundary dates (inclusive vs exclusive)
+    // startDate itself (2026-11-02, Monday) is exempted
+    const checkStartDate = checkRoomAvailability(
+      roomBK07,
+      '2026-11-02',
+      '09:00',
+      '11:00',
+      allSlots,
+      [],
+      [],
+      [exStudyWeek]
+    );
+    assert.equal(checkStartDate.status, 'AVAILABLE', 'startDate itself (2026-11-02) must be exempted');
+
+    // 1 day before startDate (2026-11-01, Sunday) is NOT exempted
+    const checkBeforeStart = checkRoomAvailability(
+      roomBK07,
+      '2026-11-01',
+      '09:00',
+      '11:00',
+      allSlots,
+      [],
+      [],
+      [exStudyWeek]
+    );
+    assert.equal(checkBeforeStart.status, 'OCCUPIED_ACADEMIC', '1 day before startDate (2026-11-01) must NOT be exempted');
+
+    // endDate itself (2026-11-08, Sunday) is exempted
+    const checkEndDate = checkRoomAvailability(
+      roomBK07,
+      '2026-11-08',
+      '09:00',
+      '11:00',
+      allSlots,
+      [],
+      [],
+      [exStudyWeek]
+    );
+    assert.equal(checkEndDate.status, 'AVAILABLE', 'endDate itself (2026-11-08) must be exempted');
+
+    // 1 day after endDate (2026-11-09, Monday) is NOT exempted
+    const checkAfterEnd = checkRoomAvailability(
+      roomBK07,
+      '2026-11-09',
+      '09:00',
+      '11:00',
+      allSlots,
+      [],
+      [],
+      [exStudyWeek]
+    );
+    assert.equal(checkAfterEnd.status, 'OCCUPIED_ACADEMIC', '1 day after endDate (2026-11-09) must NOT be exempted');
+
+    // 4. Room Scope Tests
+    // BILIK_KULIAH scope does NOT exempt Makmal Komputer
+    const acadSlotLabTuesday: AcademicScheduleSlot = {
+      id: 'SCH-LAB-TUE',
+      roomId: 'MAKMAL_ALFA',
+      dayOfWeek: 'Selasa',
+      startTime: '09:00',
+      endTime: '12:00',
+      courseCode: 'CS110',
+      courseName: 'Pengaturcaraan Web',
+      className: 'DIT 2A',
+      lecturerName: 'En. Razak',
+      department: 'Jabatan Sains Komputer'
+    };
+    const checkLab = checkRoomAvailability(
+      roomLab,
+      '2026-11-03',
+      '09:00',
+      '12:00',
+      [acadSlotLabTuesday],
+      [],
+      [],
+      [exStudyWeek]
+    );
+    assert.equal(checkLab.status, 'OCCUPIED_ACADEMIC', 'BILIK_KULIAH scope must not exempt Makmal Komputer');
+
+    // SELECTED scope only exempts specified roomIds
+    const exSelected: AcademicExemption = {
+      id: 'EX-SEL-001',
+      title: 'Study Week BK07 Sahaja',
+      startDate: '2026-11-02',
+      endDate: '2026-11-08',
+      scope: 'SELECTED',
+      roomIds: ['BK07'],
+      active: true,
+      createdBy: 'Admin KPMBP',
+      createdAt: '2026-10-30T00:00:00Z'
+    };
+    const acadSlotBK01Tuesday: AcademicScheduleSlot = {
+      id: 'SCH-BK01-TUE',
+      roomId: 'BK01',
+      dayOfWeek: 'Selasa',
+      startTime: '09:00',
+      endTime: '12:00',
+      courseCode: 'ENG101',
+      courseName: 'English Communication',
+      className: 'DCS 1B',
+      lecturerName: 'Ms. Sarah',
+      department: 'Jabatan Bahasa'
+    };
+    const checkSelectedBK07 = checkRoomAvailability(
+      roomBK07,
+      '2026-11-03',
+      '09:00',
+      '12:00',
+      allSlots,
+      [],
+      [],
+      [exSelected]
+    );
+    assert.equal(checkSelectedBK07.status, 'AVAILABLE', 'Room in SELECTED roomIds must be exempted');
+
+    const checkSelectedBK01 = checkRoomAvailability(
+      roomBK01,
+      '2026-11-03',
+      '09:00',
+      '12:00',
+      [acadSlotBK01Tuesday],
+      [],
+      [],
+      [exSelected]
+    );
+    assert.equal(checkSelectedBK01.status, 'OCCUPIED_ACADEMIC', 'Room NOT in SELECTED roomIds must NOT be exempted');
+
+    // 5. Overlapping InstitutionalBlock (Exam / Layer 3 strictly beats Study Week)
+    const examBlock: InstitutionalBlock = {
+      id: 'BLK-EXAM-01',
+      roomId: 'BK07',
+      date: '2026-11-03',
+      startTime: '09:00',
+      endTime: '12:00',
+      title: 'Peperiksaan Akhir MAT111',
+      reason: 'Peperiksaan Akhir Semester',
+      category: 'EXAM',
+      createdBy: 'Unit Peperiksaan'
+    };
+    const checkExamBlock = checkRoomAvailability(
+      roomBK07,
+      '2026-11-03',
+      '09:00',
+      '12:00',
+      allSlots,
+      [],
+      [examBlock],
+      [exStudyWeek]
+    );
+    assert.equal(checkExamBlock.status, 'BLOCKED', 'Layer 3 InstitutionalBlock (Exam) strictly overrides Study Week exemption');
+
+    // 6. Overlapping existing CONFIRMED AdHocBooking (Layer 2)
+    const existingConfirmedBooking: AdHocBooking = {
+      id: 'BK-20261103-001',
+      roomId: 'BK07',
+      roomName: 'Bilik Kuliah 07',
+      date: '2026-11-03',
+      startTime: '09:00',
+      endTime: '11:00',
+      applicantName: 'Ustaz Azman',
+      applicantEmail: 'azman@mara.gov.my',
+      applicantRole: 'Pensyarah',
+      department: 'Jabatan Pengajian Islam',
+      purposeCategory: 'Kelas',
+      title: 'Bengkel Persediaan Peperiksaan',
+      paxCount: 25,
+      status: 'CONFIRMED',
+      createdAt: '2026-11-01T00:00:00Z'
+    };
+    const checkBookingConflict = checkRoomAvailability(
+      roomBK07,
+      '2026-11-03',
+      '09:00',
+      '12:00',
+      allSlots,
+      [existingConfirmedBooking],
+      [],
+      [exStudyWeek]
+    );
+    assert.equal(checkBookingConflict.status, 'OCCUPIED_BOOKING', 'Existing confirmed ad-hoc booking overrides availability even during Study Week');
+
+    // 7. Lecturer adhoc booking scenario on 3 Nov 2026 BK07 09:00-12:00 (MAT111)
+    const withExemption = checkRoomAvailability(
+      roomBK07,
+      '2026-11-03',
+      '09:00',
+      '12:00',
+      allSlots,
+      [],
+      [],
+      [exStudyWeek]
+    );
+    assert.equal(withExemption.status, 'AVAILABLE', 'With study week exemption: Lecturer adhoc booking is AVAILABLE');
+
+    const withoutExemption = checkRoomAvailability(
+      roomBK07,
+      '2026-11-03',
+      '09:00',
+      '12:00',
+      allSlots,
+      [],
+      [],
+      []
+    );
+    assert.equal(withoutExemption.status, 'OCCUPIED_ACADEMIC', 'Without study week exemption: Blocked by academic timetable (OCCUPIED_ACADEMIC)');
+
+    // 8. validateExemptionInput tests
+    // (a) endDate < startDate
+    const valEndBeforeStart = validateExemptionInput({
+      title: 'Valid Title',
+      startDate: '2026-11-10',
+      endDate: '2026-11-05',
+      scope: 'ALL_ROOMS'
+    });
+    assert.equal(valEndBeforeStart.isValid, false, 'endDate before startDate must be invalid');
+    assert.ok(valEndBeforeStart.errors.some(e => e.toLowerCase().includes('tarikh tamat')), 'Error must mention tarikh tamat');
+
+    // (b) Duration > 31 days
+    const valTooLong = validateExemptionInput({
+      title: 'Valid Title',
+      startDate: '2026-11-01',
+      endDate: '2026-12-15', // 45 days
+      scope: 'ALL_ROOMS'
+    });
+    assert.equal(valTooLong.isValid, false, 'Duration > 31 days must be invalid');
+    assert.ok(valTooLong.errors.some(e => e.includes('31 hari')), 'Error must mention 31 days limit');
+
+    // (c) Empty title
+    const valEmptyTitle = validateExemptionInput({
+      title: '   ',
+      startDate: '2026-11-02',
+      endDate: '2026-11-08',
+      scope: 'ALL_ROOMS'
+    });
+    assert.equal(valEmptyTitle.isValid, false, 'Empty title must be invalid');
+    assert.ok(valEmptyTitle.errors.some(e => e.includes('Tajuk')), 'Error must mention Tajuk');
+
+    // (d) Scope SELECTED without rooms
+    const valSelectedNoRooms = validateExemptionInput({
+      title: 'Study Week',
+      startDate: '2026-11-02',
+      endDate: '2026-11-08',
+      scope: 'SELECTED',
+      roomIds: []
+    });
+    assert.equal(valSelectedNoRooms.isValid, false, 'SELECTED scope without rooms must be invalid');
+    assert.ok(valSelectedNoRooms.errors.some(e => e.includes('sekurang-kurangnya satu bilik')), 'Error must mention room selection');
+
+    // (e) Warning for overlapping active exemption
+    const valOverlap = validateExemptionInput(
+      {
+        title: 'New Study Week',
+        startDate: '2026-11-05',
+        endDate: '2026-11-12',
+        scope: 'BILIK_KULIAH'
+      },
+      [exStudyWeek]
+    );
+    assert.equal(valOverlap.isValid, true, 'Overlap is a warning, not a fatal blocking error');
+    assert.ok(valOverlap.warnings.length > 0, 'Overlap must generate warning');
+
+    // 9. Quick date calculation verification:
+    // +6 days from 2026-11-09 = 2026-11-15 (1 week / 7 days inclusive)
+    // +13 days from 2026-11-09 = 2026-11-22 (2 weeks / 14 days inclusive)
+    const computeQuickEnd = (startStr: string, daysToAdd: number): string => {
+      const [y, m, d] = startStr.split('-').map(Number);
+      const dt = new Date(y, m - 1, d);
+      dt.setDate(dt.getDate() + daysToAdd);
+      return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+    };
+
+    const oneWeekEnd = computeQuickEnd('2026-11-09', 6);
+    assert.equal(oneWeekEnd, '2026-11-15', '1 week quick duration from 2026-11-09 must be 2026-11-15');
+
+    const twoWeekEnd = computeQuickEnd('2026-11-09', 13);
+    assert.equal(twoWeekEnd, '2026-11-22', '2 weeks quick duration from 2026-11-09 must be 2026-11-22');
+
+    console.log('  ✔ Gate 6 PASSED: Academic Exemptions (Study Week) availability logic, boundary math, scope filtering, exam layer precedence, validation, and quick date calculations fully verified.\n');
+    passedGates++;
+  } catch (err) {
+    console.error('  ✘ Gate 6 FAILED:', err);
   }
 
   console.log('========================================================================');

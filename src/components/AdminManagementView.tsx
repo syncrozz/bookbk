@@ -1,16 +1,45 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { 
   AdHocBooking, 
   Room, 
   AcademicScheduleSlot,
   StaffUser,
-  InstitutionalBlock
+  InstitutionalBlock,
+  AcademicExemption
 } from '../types';
-import { formatDateMalay, exportBookingsToCSV } from '../utils/availabilityEngine';
+import { 
+  formatDateMalay, 
+  getMalayDayOfWeek,
+  exportBookingsToCSV,
+  findActiveExemption,
+  countAffectedAcademicSlots,
+  validateExemptionInput
+} from '../utils/availabilityEngine';
+import {
+  getTodayMalaysia,
+  getThisWeekRange,
+  getNextWeekRange,
+  getTwoWeeksFromNextWeekRange,
+  getNextMonday,
+  snapToMonday,
+  addDays,
+  summarizeRange,
+  buildAutoTitle,
+  getIsoDayOfWeek,
+  getMalayDayName,
+  formatDateMalayShort,
+  formatRangeMalay,
+} from '../utils/exemptionDates';
+import { DateRangeCalendar } from './DateRangeCalendar';
 import { parseTimetableCSV, exportTimetableToStandardGridCSV } from '../utils/timetableCsvParser';
 import { MASTER_TIMETABLE_CSV, STANDARD_GRID_TEMPLATE_CSV, INITIAL_ROOMS } from '../data/initialData';
 import { CloudSyncModal } from './CloudSyncModal';
-import { updateStaffPinInCloud, resetStaffPinInCloud, getDirectFirestoreRoomsCount } from '../lib/firebase';
+import { 
+  updateStaffPinInCloud, 
+  resetStaffPinInCloud, 
+  getDirectFirestoreRoomsCount,
+  saveAcademicExemptionsToCloud
+} from '../lib/firebase';
 import { getStoredRooms } from '../utils/storage';
 import { ensureBookbkPrefix } from '../utils/downloadHelper';
 import { WhatsAppIcon } from './WhatsAppIcon';
@@ -46,7 +75,9 @@ import {
   LogOut,
   MapPin,
   GraduationCap,
-  ShieldAlert
+  ShieldAlert,
+  Edit2,
+  Copy
 } from 'lucide-react';
 import { 
   ROOMS_CSV_HEADERS, 
@@ -63,6 +94,7 @@ interface AdminManagementViewProps {
   staffList?: StaffUser[];
   academicSchedule?: AcademicScheduleSlot[];
   institutionalBlocks?: InstitutionalBlock[];
+  academicExemptions?: AcademicExemption[];
   onApproveBooking: (id: string) => void;
   onRejectBooking: (id: string) => void;
   onResetData: () => void;
@@ -80,6 +112,7 @@ interface AdminManagementViewProps {
   onSyncBookings?: (bookings: AdHocBooking[], mode?: 'merge' | 'replace') => Promise<void> | void;
   onNavigateTab?: (tab: any) => void;
   onRefreshStaffFromCloud?: () => Promise<void>;
+  onSaveAcademicExemptions?: (exemptions: AcademicExemption[]) => Promise<void> | void;
 }
 
 export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
@@ -88,6 +121,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   staffList = [],
   academicSchedule = [],
   institutionalBlocks = [],
+  academicExemptions = [],
   onApproveBooking,
   onRejectBooking,
   onResetData,
@@ -104,7 +138,8 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   onLogoutAdmin,
   onSyncBookings,
   onNavigateTab,
-  onRefreshStaffFromCloud
+  onRefreshStaffFromCloud,
+  onSaveAcademicExemptions
 }) => {
   const pendingBookings = bookings.filter(b => b.status === 'PENDING');
 
@@ -136,6 +171,287 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   const [blockSearchTerm, setBlockSearchTerm] = useState<string>('');
   const [blockFilterCategory, setBlockFilterCategory] = useState<'ALL' | 'EXAM' | 'INSTITUTIONAL' | 'MAINTENANCE'>('ALL');
   const [isRefreshingStaff, setIsRefreshingStaff] = useState<boolean>(false);
+
+  // Study Week Academic Exemptions State
+  const [exemptionList, setExemptionList] = useState<AcademicExemption[]>(academicExemptions);
+  useEffect(() => {
+    setExemptionList(academicExemptions);
+  }, [academicExemptions]);
+
+  const todayMalaysia = useMemo(() => getTodayMalaysia(), []);
+  const initialTwoWeeksRange = useMemo(() => getTwoWeeksFromNextWeekRange(getTodayMalaysia()), []);
+
+  const [exemptionIdToEdit, setExemptionIdToEdit] = useState<string | null>(null);
+  const [exemptionStartDate, setExemptionStartDate] = useState<string>(initialTwoWeeksRange.start);
+  const [exemptionEndDate, setExemptionEndDate] = useState<string>(initialTwoWeeksRange.end);
+  const [exemptionTitle, setExemptionTitle] = useState<string>(() => buildAutoTitle(initialTwoWeeksRange.start, initialTwoWeeksRange.end));
+  const [isUserEditedTitle, setIsUserEditedTitle] = useState<boolean>(false);
+  const [autoCalcEndDate, setAutoCalcEndDate] = useState<boolean>(true);
+  const [showCalendarPicker, setShowCalendarPicker] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 768;
+    }
+    return true;
+  });
+
+  const startDateInputRef = useRef<HTMLInputElement>(null);
+  const endDateInputRef = useRef<HTMLInputElement>(null);
+
+  const triggerDatePicker = (ref: React.RefObject<HTMLInputElement | null>) => {
+    try {
+      ref.current?.showPicker?.();
+    } catch {
+      ref.current?.focus();
+    }
+  };
+
+  const resetExemptionForm = () => {
+    const defaultRange = getTwoWeeksFromNextWeekRange(todayMalaysia);
+    setExemptionIdToEdit(null);
+    setExemptionStartDate(defaultRange.start);
+    setExemptionEndDate(defaultRange.end);
+    setExemptionTitle(buildAutoTitle(defaultRange.start, defaultRange.end));
+    setIsUserEditedTitle(false);
+    setAutoCalcEndDate(true);
+    setExemptionScope('BILIK_KULIAH');
+    setSelectedExemptionRooms([]);
+    setExemptionReason('');
+    setExemptionMsg(null);
+  };
+
+  const handleStartDateChange = (newStart: string) => {
+    setExemptionStartDate(newStart);
+    if (!newStart) return;
+
+    if (autoCalcEndDate) {
+      let durationDays = 14;
+      if (exemptionStartDate && exemptionEndDate && exemptionEndDate >= exemptionStartDate) {
+        durationDays = summarizeRange(exemptionStartDate, exemptionEndDate).totalDays;
+      }
+      const newEnd = addDays(newStart, durationDays - 1);
+      setExemptionEndDate(newEnd);
+      if (!isUserEditedTitle) {
+        setExemptionTitle(buildAutoTitle(newStart, newEnd));
+      }
+    } else {
+      if (!isUserEditedTitle && exemptionEndDate && exemptionEndDate >= newStart) {
+        setExemptionTitle(buildAutoTitle(newStart, exemptionEndDate));
+      }
+    }
+  };
+
+  const handleEndDateChange = (newEnd: string) => {
+    setExemptionEndDate(newEnd);
+    setAutoCalcEndDate(false);
+    if (!isUserEditedTitle && exemptionStartDate && newEnd >= exemptionStartDate) {
+      setExemptionTitle(buildAutoTitle(exemptionStartDate, newEnd));
+    }
+  };
+
+  const handleCalendarRangeChange = (start: string, end: string) => {
+    setExemptionStartDate(start);
+    setExemptionEndDate(end);
+    if (start && end && end >= start) {
+      if (!isUserEditedTitle) {
+        setExemptionTitle(buildAutoTitle(start, end));
+      }
+    }
+  };
+
+  const applyQuickRange = (start: string, end: string) => {
+    setExemptionStartDate(start);
+    setExemptionEndDate(end);
+    setAutoCalcEndDate(true);
+    if (!isUserEditedTitle) {
+      setExemptionTitle(buildAutoTitle(start, end));
+    }
+  };
+
+  const handleQuickDuration = (daysToAdd: number) => {
+    let start = exemptionStartDate;
+    if (!start) {
+      start = getNextMonday(todayMalaysia);
+      setExemptionStartDate(start);
+    }
+    const end = addDays(start, daysToAdd);
+    setExemptionEndDate(end);
+    setAutoCalcEndDate(true);
+    if (!isUserEditedTitle) {
+      setExemptionTitle(buildAutoTitle(start, end));
+    }
+  };
+
+  const handleAdjustToMonday = () => {
+    if (!exemptionStartDate) return;
+    const monday = snapToMonday(exemptionStartDate);
+    handleStartDateChange(monday);
+  };
+
+  const rangeSummary = useMemo(() => {
+    return summarizeRange(exemptionStartDate, exemptionEndDate);
+  }, [exemptionStartDate, exemptionEndDate]);
+
+  const lectureRoomScopeText = useMemo(() => {
+    const lectureRooms = rooms.filter(r => r.category === 'Bilik Kuliah');
+    const count = lectureRooms.length;
+    const bkNumbers = lectureRooms
+      .map(r => {
+        const m = r.code.match(/^BK(\d+)$/i);
+        return m ? parseInt(m[1], 10) : null;
+      })
+      .filter((n): n is number => n !== null)
+      .sort((a, b) => a - b);
+
+    if (bkNumbers.length === count && count > 1) {
+      const min = bkNumbers[0];
+      const max = bkNumbers[bkNumbers.length - 1];
+      const minCode = `BK${String(min).padStart(2, '0')}`;
+      const maxCode = `BK${String(max).padStart(2, '0')}`;
+      return `Disyorkan (${count} Bilik Kuliah: ${minCode}–${maxCode})`;
+    }
+    return `Disyorkan (${count} Bilik Kuliah)`;
+  }, [rooms]);
+
+  const [exemptionScope, setExemptionScope] = useState<'ALL_ROOMS' | 'BILIK_KULIAH' | 'SELECTED'>('BILIK_KULIAH');
+  const [selectedExemptionRooms, setSelectedExemptionRooms] = useState<string[]>([]);
+  const [exemptionReason, setExemptionReason] = useState<string>('');
+  const [isSavingExemption, setIsSavingExemption] = useState<boolean>(false);
+  const [exemptionMsg, setExemptionMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
+  const [pendingExemptionToSave, setPendingExemptionToSave] = useState<AcademicExemption | null>(null);
+  const [deleteConfirmExemptionId, setDeleteConfirmExemptionId] = useState<string | null>(null);
+
+  const handleInitiateSaveExemption = (e: React.FormEvent) => {
+    e.preventDefault();
+    setExemptionMsg(null);
+
+    const draft: Partial<AcademicExemption> = {
+      id: exemptionIdToEdit || undefined,
+      title: exemptionTitle,
+      startDate: exemptionStartDate,
+      endDate: exemptionEndDate,
+      scope: exemptionScope,
+      roomIds: selectedExemptionRooms,
+      reason: exemptionReason,
+      active: true,
+    };
+
+    const val = validateExemptionInput(draft, exemptionList);
+    if (!val.isValid) {
+      setExemptionMsg({ text: val.errors.join(' '), type: 'error' });
+      return;
+    }
+
+    const finalItem: AcademicExemption = {
+      id: exemptionIdToEdit || `EX-${exemptionStartDate.replace(/-/g, '')}-${String(Date.now()).slice(-4)}`,
+      title: exemptionTitle.trim(),
+      startDate: exemptionStartDate,
+      endDate: exemptionEndDate,
+      scope: exemptionScope,
+      active: true,
+      createdBy: 'Admin KPMBP',
+      createdAt: exemptionIdToEdit
+        ? (exemptionList.find(e => e.id === exemptionIdToEdit)?.createdAt || new Date().toISOString())
+        : new Date().toISOString()
+    };
+
+    if (exemptionScope === 'SELECTED' && selectedExemptionRooms.length > 0) {
+      finalItem.roomIds = selectedExemptionRooms;
+    }
+    if (exemptionReason.trim()) {
+      finalItem.reason = exemptionReason.trim();
+    }
+
+    setPendingExemptionToSave(finalItem);
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmSaveExemption = async () => {
+    if (!pendingExemptionToSave) return;
+    setIsSavingExemption(true);
+    setShowConfirmModal(false);
+
+    let updatedList: AcademicExemption[];
+    if (exemptionIdToEdit) {
+      updatedList = exemptionList.map(e => e.id === exemptionIdToEdit ? pendingExemptionToSave : e);
+    } else {
+      updatedList = [pendingExemptionToSave, ...exemptionList];
+    }
+
+    setExemptionList(updatedList);
+    try {
+      if (onSaveAcademicExemptions) {
+        await onSaveAcademicExemptions(updatedList);
+      } else {
+        await saveAcademicExemptionsToCloud(updatedList);
+      }
+      setExemptionMsg({ text: '🟢 Pengecualian jadual hakiki berjaya disimpan ke Cloud.', type: 'success' });
+      resetExemptionForm();
+      setPendingExemptionToSave(null);
+    } catch (err: any) {
+      setExemptionMsg({ text: `🟡 Disimpan setempat: ${err?.message || 'Ralat sambungan Cloud'}`, type: 'error' });
+    } finally {
+      setIsSavingExemption(false);
+    }
+  };
+
+  const handleToggleExemptionActive = async (id: string) => {
+    const updatedList = exemptionList.map(e => e.id === id ? { ...e, active: !e.active } : e);
+    setExemptionList(updatedList);
+    try {
+      if (onSaveAcademicExemptions) {
+        await onSaveAcademicExemptions(updatedList);
+      } else {
+        await saveAcademicExemptionsToCloud(updatedList);
+      }
+      setExemptionMsg({ text: 'Status pengecualian dikemas kini.', type: 'success' });
+    } catch (err: any) {
+      setExemptionMsg({ text: `Disimpan setempat: ${err?.message || 'Ralat sambungan Cloud'}`, type: 'error' });
+    }
+  };
+
+  const handleDeleteExemption = async (id: string) => {
+    const updatedList = exemptionList.filter(e => e.id !== id);
+    setExemptionList(updatedList);
+    setDeleteConfirmExemptionId(null);
+    try {
+      if (onSaveAcademicExemptions) {
+        await onSaveAcademicExemptions(updatedList);
+      } else {
+        await saveAcademicExemptionsToCloud(updatedList);
+      }
+      setExemptionMsg({ text: 'Pengecualian telah dipadamkan.', type: 'success' });
+    } catch (err: any) {
+      setExemptionMsg({ text: `Disimpan setempat: ${err?.message || 'Ralat sambungan Cloud'}`, type: 'error' });
+    }
+  };
+
+  const handleEditExemption = (ex: AcademicExemption) => {
+    setExemptionIdToEdit(ex.id);
+    setExemptionTitle(ex.title);
+    setIsUserEditedTitle(true);
+    setExemptionStartDate(ex.startDate);
+    setExemptionEndDate(ex.endDate);
+    setAutoCalcEndDate(false);
+    setExemptionScope(ex.scope);
+    setSelectedExemptionRooms(ex.roomIds || []);
+    setExemptionReason(ex.reason || '');
+    setExemptionMsg(null);
+  };
+
+  const handleDuplicateExemption = (ex: AcademicExemption) => {
+    const defaultRange = getTwoWeeksFromNextWeekRange(todayMalaysia);
+    setExemptionIdToEdit(null);
+    setExemptionTitle(`${ex.title} (Salinan)`);
+    setIsUserEditedTitle(true);
+    setExemptionStartDate(defaultRange.start);
+    setExemptionEndDate(defaultRange.end);
+    setAutoCalcEndDate(true);
+    setExemptionScope(ex.scope);
+    setSelectedExemptionRooms(ex.roomIds || []);
+    setExemptionReason(ex.reason || '');
+    setExemptionMsg({ text: 'Tetapan disalin. Sila pilih tarikh mula & tamat baharu.', type: 'success' });
+  };
 
   // Timetable CSV Sync State
   const [scheduleCsvFile, setScheduleCsvFile] = useState<File | null>(null);
@@ -3200,6 +3516,866 @@ ST003,Pengajian Am,Cik Siti Sarah Binti Razak,Pensyarah,013-5558899,siti.sarah@k
             </div>
           )}
         </div>
+      </div>
+
+      {/* SECTION: ACADEMIC EXEMPTIONS (STUDY WEEK) */}
+      <div className="bg-white rounded-2xl p-6 shadow-md border border-slate-200 space-y-6">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+          <div>
+            <div className="flex items-center gap-2 text-slate-900 font-extrabold text-lg">
+              <span className="text-xl">📚</span>
+              <h3>Pengecualian Jadual Hakiki (Study Week)</h3>
+              {exemptionList.filter(e => e.active).length > 0 && (
+                <span className="bg-amber-100 text-amber-800 border border-amber-300 text-xs font-bold px-2 py-0.5 rounded-full">
+                  {exemptionList.filter(e => e.active).length} Aktif
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              Tetapkan tempoh di mana jadual waktu akademik tidak menghalang tempahan. Tempahan adhoc pensyarah dibenarkan seperti biasa.
+            </p>
+          </div>
+          {exemptionIdToEdit && (
+            <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-xl">
+              <span className="text-xs font-bold text-amber-900">Sedang Mengedit:</span>
+              <button
+                type="button"
+                onClick={resetExemptionForm}
+                className="text-[11px] font-bold text-slate-600 hover:text-slate-900 underline cursor-pointer"
+              >
+                Batal Edit
+              </button>
+            </div>
+          )}
+        </div>
+
+        {exemptionMsg && (
+          <div className={`p-3.5 rounded-xl text-xs font-semibold flex items-center gap-2 border ${
+            exemptionMsg.type === 'success' 
+              ? 'bg-emerald-50 text-emerald-900 border-emerald-200' 
+              : 'bg-rose-50 text-rose-900 border-rose-200'
+          }`}>
+            {exemptionMsg.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            )}
+            <span>{exemptionMsg.text}</span>
+          </div>
+        )}
+
+        {/* Form Tambah / Edit Pengecualian */}
+        <form onSubmit={handleInitiateSaveExemption} className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-5">
+          <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+            <h4 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+              <CalendarRange className="w-4 h-4 text-amber-600" />
+              <span>{exemptionIdToEdit ? 'Kemaskini Tempoh Pengecualian' : 'Tetapkan Tempoh Pengecualian Baharu'}</span>
+            </h4>
+            <span className="text-[11px] text-slate-500 font-medium">Data disimpan ke Cloud Firestore</span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Tajuk Pengecualian */}
+            <div className="md:col-span-2 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                  <span>Tajuk Pengecualian</span>
+                  <span className="text-rose-500">*</span>
+                </label>
+                {!isUserEditedTitle && (
+                  <span className="text-[10px] text-amber-700 bg-amber-100/70 px-1.5 py-0.5 rounded font-semibold">
+                    Tajuk dijana secara automatik
+                  </span>
+                )}
+              </div>
+              <input
+                type="text"
+                value={exemptionTitle}
+                onChange={e => {
+                  setExemptionTitle(e.target.value);
+                  setIsUserEditedTitle(true);
+                }}
+                placeholder="Contoh: Study Week Semester Nov 2026"
+                className="w-full text-xs font-medium px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white"
+                required
+              />
+            </div>
+
+            {/* BAHAGIAN 1: Kumpulan Butang Pintas Tempoh */}
+            <div className="md:col-span-2 space-y-2 pt-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-700 font-bold flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Pilihan Pantas Tempoh:</span>
+                </span>
+                {exemptionStartDate && exemptionEndDate && (
+                  <span className="text-[11px] font-semibold text-amber-900 bg-amber-100/80 px-2 py-0.5 rounded-md">
+                    {formatRangeMalay(exemptionStartDate, exemptionEndDate)}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {/* 1. Minggu Ini */}
+                {(() => {
+                  const thisW = getThisWeekRange(todayMalaysia);
+                  const isActive = exemptionStartDate === thisW.start && exemptionEndDate === thisW.end;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => applyQuickRange(thisW.start, thisW.end)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
+                        isActive
+                          ? 'bg-amber-500 text-white border-amber-600 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-amber-50 hover:border-amber-300'
+                      }`}
+                    >
+                      Minggu Ini
+                    </button>
+                  );
+                })()}
+
+                {/* 2. Minggu Depan */}
+                {(() => {
+                  const nextW = getNextWeekRange(todayMalaysia);
+                  const isActive = exemptionStartDate === nextW.start && exemptionEndDate === nextW.end;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => applyQuickRange(nextW.start, nextW.end)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
+                        isActive
+                          ? 'bg-amber-500 text-white border-amber-600 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-amber-50 hover:border-amber-300'
+                      }`}
+                    >
+                      Minggu Depan
+                    </button>
+                  );
+                })()}
+
+                {/* 3. 2 Minggu Bermula Minggu Depan (Diserlahkan / Pilihan Utama) */}
+                {(() => {
+                  const twoW = getTwoWeeksFromNextWeekRange(todayMalaysia);
+                  const isActive = exemptionStartDate === twoW.start && exemptionEndDate === twoW.end;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => applyQuickRange(twoW.start, twoW.end)}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer flex items-center gap-1.5 ${
+                        isActive
+                          ? 'bg-amber-600 text-white border-amber-700 shadow-sm ring-2 ring-amber-300'
+                          : 'bg-amber-100 text-amber-950 border-amber-300 hover:bg-amber-200'
+                      }`}
+                    >
+                      <span>⭐ 2 Minggu Bermula Minggu Depan</span>
+                      <span className="text-[10px] px-1 py-0.2 rounded bg-amber-200/80 text-amber-900 font-extrabold uppercase">
+                        Disyorkan
+                      </span>
+                    </button>
+                  );
+                })()}
+
+                {/* 4. + 1 Minggu */}
+                <button
+                  type="button"
+                  onClick={() => handleQuickDuration(6)}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 font-semibold px-2.5 py-1.5 rounded-xl text-xs transition cursor-pointer"
+                >
+                  + 1 Minggu
+                </button>
+
+                {/* 5. + 2 Minggu */}
+                <button
+                  type="button"
+                  onClick={() => handleQuickDuration(13)}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 font-semibold px-2.5 py-1.5 rounded-xl text-xs transition cursor-pointer"
+                >
+                  + 2 Minggu
+                </button>
+              </div>
+            </div>
+
+            {/* Tarikh Mula */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                  <span>Tarikh Mula (Inklusif)</span>
+                  <span className="text-rose-500">*</span>
+                </label>
+                {exemptionStartDate && (
+                  <span className="text-[11px] font-semibold text-amber-800">
+                    {getMalayDayName(exemptionStartDate)}
+                  </span>
+                )}
+              </div>
+              <div className="relative">
+                <input
+                  ref={startDateInputRef}
+                  type="date"
+                  min={!exemptionIdToEdit ? todayMalaysia : undefined}
+                  value={exemptionStartDate}
+                  onChange={e => handleStartDateChange(e.target.value)}
+                  className="w-full text-xs font-medium px-3.5 py-2.5 pr-9 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => triggerDatePicker(startDateInputRef)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-amber-600 transition cursor-pointer"
+                  title="Buka pemilih tarikh"
+                >
+                  <Calendar className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Amaran Bukan Isnin */}
+              {exemptionStartDate && getIsoDayOfWeek(exemptionStartDate) !== 1 && (
+                <div className="flex items-center justify-between gap-2 p-2 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-950 animate-in fade-in">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    <span className="truncate">
+                      Tarikh mula ialah hari {getMalayDayName(exemptionStartDate)}. Laraskan ke Isnin {formatDateMalayShort(snapToMonday(exemptionStartDate))}?
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAdjustToMonday}
+                    className="px-2 py-0.5 bg-amber-500 hover:bg-amber-600 text-white rounded font-bold text-[10px] shrink-0 transition cursor-pointer"
+                  >
+                    Ya, laraskan
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Tarikh Tamat */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                  <span>Tarikh Tamat (Inklusif)</span>
+                  <span className="text-rose-500">*</span>
+                </label>
+                <label className="flex items-center gap-1.5 text-[11px] text-slate-500 font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoCalcEndDate}
+                    onChange={e => setAutoCalcEndDate(e.target.checked)}
+                    className="rounded text-amber-600 focus:ring-amber-500 w-3.5 h-3.5"
+                  />
+                  <span>Kira tarikh tamat automatik</span>
+                </label>
+              </div>
+              <div className="relative">
+                <input
+                  ref={endDateInputRef}
+                  type="date"
+                  min={exemptionStartDate || (!exemptionIdToEdit ? todayMalaysia : undefined)}
+                  value={exemptionEndDate}
+                  onChange={e => handleEndDateChange(e.target.value)}
+                  className="w-full text-xs font-medium px-3.5 py-2.5 pr-9 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => triggerDatePicker(endDateInputRef)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-amber-600 transition cursor-pointer"
+                  title="Buka pemilih tarikh"
+                >
+                  <Calendar className="w-4 h-4" />
+                </button>
+              </div>
+
+              {exemptionStartDate && exemptionEndDate && exemptionEndDate < exemptionStartDate && (
+                <p className="text-[11px] text-rose-600 font-bold flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>Tarikh tamat tidak boleh lebih awal daripada tarikh mula.</span>
+                </p>
+              )}
+            </div>
+
+            {/* BAHAGIAN 3: Komponen Kalendar Julat Tersuai */}
+            <div className="md:col-span-2 space-y-2 pt-1">
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setShowCalendarPicker(prev => !prev)}
+                  className="text-xs font-bold text-amber-800 hover:text-amber-950 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 transition cursor-pointer"
+                >
+                  <CalendarRange className="w-4 h-4 text-amber-600" />
+                  <span>{showCalendarPicker ? '📅 Sembunyikan kalendar' : '📅 Pilih daripada kalendar'}</span>
+                </button>
+                <span className="text-[11px] text-slate-400">
+                  Ketuk tarikh mula kemudian tarikh tamat
+                </span>
+              </div>
+
+              {showCalendarPicker && (
+                <div className="pt-1 animate-in fade-in duration-200">
+                  <DateRangeCalendar
+                    startDate={exemptionStartDate}
+                    endDate={exemptionEndDate}
+                    onChange={handleCalendarRangeChange}
+                    existingExemptions={exemptionList}
+                    blocks={institutionalBlocks}
+                    minDate={!exemptionIdToEdit ? todayMalaysia : undefined}
+                  />
+                </div>
+              )}
+
+              {/* BAHAGIAN 4: Ringkasan Julat Tarikh */}
+              <div className="bg-amber-50/80 border border-amber-200/90 rounded-xl p-3 text-xs text-amber-950 flex items-center justify-between gap-2 shadow-2xs">
+                {exemptionStartDate && exemptionEndDate && exemptionEndDate >= exemptionStartDate ? (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Calendar className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span className="font-semibold text-slate-800">
+                      📅 {formatRangeMalay(exemptionStartDate, exemptionEndDate)} —{' '}
+                      <strong className="text-amber-900 font-extrabold">{rangeSummary.totalDays} hari</strong>{' '}
+                      <span className="text-amber-800">({rangeSummary.weekdays} hari bekerja, {rangeSummary.weekendDays} hari hujung minggu)</span>
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-slate-500 italic flex items-center gap-1.5">
+                    <Calendar className="w-4 h-4 text-slate-400" />
+                    <span>Pilih tarikh mula dan tamat</span>
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* BAHAGIAN 5: Skop Bilik (Dinamik mengikut data bilik sebenar) */}
+            <div className="md:col-span-2 space-y-2 pt-2 border-t border-slate-200">
+              <label className="text-xs font-bold text-slate-700 block">
+                Skop Pengecualian Bilik
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <label className={`p-3 rounded-xl border flex items-start gap-2.5 cursor-pointer transition ${
+                  exemptionScope === 'BILIK_KULIAH' 
+                    ? 'bg-amber-50 border-amber-400 ring-2 ring-amber-300' 
+                    : 'bg-white border-slate-200 hover:bg-slate-100'
+                }`}>
+                  <input
+                    type="radio"
+                    name="exemptionScope"
+                    value="BILIK_KULIAH"
+                    checked={exemptionScope === 'BILIK_KULIAH'}
+                    onChange={() => setExemptionScope('BILIK_KULIAH')}
+                    className="mt-0.5 text-amber-600 focus:ring-amber-500"
+                  />
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 block">Bilik Kuliah Sahaja</span>
+                    <span className="text-[10.5px] text-slate-500">
+                      {lectureRoomScopeText}
+                    </span>
+                  </div>
+                </label>
+
+                <label className={`p-3 rounded-xl border flex items-start gap-2.5 cursor-pointer transition ${
+                  exemptionScope === 'ALL_ROOMS' 
+                    ? 'bg-amber-50 border-amber-400 ring-2 ring-amber-300' 
+                    : 'bg-white border-slate-200 hover:bg-slate-100'
+                }`}>
+                  <input
+                    type="radio"
+                    name="exemptionScope"
+                    value="ALL_ROOMS"
+                    checked={exemptionScope === 'ALL_ROOMS'}
+                    onChange={() => setExemptionScope('ALL_ROOMS')}
+                    className="mt-0.5 text-amber-600 focus:ring-amber-500"
+                  />
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 block">Semua Bilik</span>
+                    <span className="text-[10.5px] text-slate-500">
+                      Termasuk makmal &amp; dewan ({rooms.length} bilik)
+                    </span>
+                  </div>
+                </label>
+
+                <label className={`p-3 rounded-xl border flex items-start gap-2.5 cursor-pointer transition ${
+                  exemptionScope === 'SELECTED' 
+                    ? 'bg-amber-50 border-amber-400 ring-2 ring-amber-300' 
+                    : 'bg-white border-slate-200 hover:bg-slate-100'
+                }`}>
+                  <input
+                    type="radio"
+                    name="exemptionScope"
+                    value="SELECTED"
+                    checked={exemptionScope === 'SELECTED'}
+                    onChange={() => setExemptionScope('SELECTED')}
+                    className="mt-0.5 text-amber-600 focus:ring-amber-500"
+                  />
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 block">Bilik Tertentu</span>
+                    <span className="text-[10.5px] text-slate-500">
+                      Pilih dari senarai bilik ({selectedExemptionRooms.length} dipilih)
+                    </span>
+                  </div>
+                </label>
+              </div>
+
+              {/* Checklist jika Skop = SELECTED */}
+              {exemptionScope === 'SELECTED' && (
+                <div className="bg-white border border-slate-300 rounded-xl p-3 space-y-2 mt-2">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                    <span className="text-xs font-bold text-slate-700">Pilih Bilik Terlibat:</span>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedExemptionRooms(rooms.map(r => r.id))}
+                        className="text-[11px] text-amber-700 hover:underline font-semibold cursor-pointer"
+                      >
+                        Pilih Semua ({rooms.length})
+                      </button>
+                      <span className="text-slate-300">|</span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedExemptionRooms([])}
+                        className="text-[11px] text-slate-500 hover:underline font-semibold cursor-pointer"
+                      >
+                        Kosongkan
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto p-1">
+                    {rooms.map(room => {
+                      const isChecked = selectedExemptionRooms.includes(room.id);
+                      return (
+                        <label
+                          key={room.id}
+                          className={`flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer transition ${
+                            isChecked ? 'bg-amber-50 border-amber-300 font-bold text-amber-900' : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={e => {
+                              if (e.target.checked) {
+                                setSelectedExemptionRooms(prev => [...prev, room.id]);
+                              } else {
+                                setSelectedExemptionRooms(prev => prev.filter(id => id !== room.id));
+                              }
+                            }}
+                            className="rounded text-amber-600 focus:ring-amber-500"
+                          />
+                          <span className="truncate" title={room.name}>{room.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Catatan / Sebab */}
+            <div className="md:col-span-2 space-y-1.5 pt-2 border-t border-slate-200">
+              <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                <span>Catatan / Sebab (Pilihan)</span>
+                <span className="text-[10px] text-slate-400">Dipaparkan kepada pentadbir</span>
+              </label>
+              <textarea
+                value={exemptionReason}
+                onChange={e => setExemptionReason(e.target.value)}
+                placeholder="Contoh: Minggu ulangkaji akhir semester, tiada kelas berjadual hakiki. Tempahan adhoc dibuka."
+                rows={2}
+                className="w-full text-xs font-medium px-3.5 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white"
+              />
+            </div>
+          </div>
+
+          {/* Pratonton Impak (Impact Preview) */}
+          {(() => {
+            const draft: Partial<AcademicExemption> = {
+              id: exemptionIdToEdit || 'draft',
+              title: exemptionTitle,
+              startDate: exemptionStartDate,
+              endDate: exemptionEndDate,
+              scope: exemptionScope,
+              roomIds: selectedExemptionRooms,
+              active: true
+            };
+            const val = validateExemptionInput(draft, exemptionList);
+
+            let durationDays = 0;
+            if (exemptionStartDate && exemptionEndDate && exemptionEndDate >= exemptionStartDate) {
+              const [sy, sm, sd] = exemptionStartDate.split('-').map(Number);
+              const [ey, em, ed] = exemptionEndDate.split('-').map(Number);
+              durationDays = Math.round((new Date(ey, em - 1, ed).getTime() - new Date(sy, sm - 1, sd).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+            }
+
+            const affectedRooms = rooms.filter(r => {
+              if (exemptionScope === 'ALL_ROOMS') return true;
+              if (exemptionScope === 'BILIK_KULIAH') return r.category === 'Bilik Kuliah';
+              if (exemptionScope === 'SELECTED') return selectedExemptionRooms.includes(r.id);
+              return false;
+            });
+
+            const affectedSlots = (exemptionStartDate && exemptionEndDate && exemptionEndDate >= exemptionStartDate)
+              ? countAffectedAcademicSlots(
+                  {
+                    id: 'preview',
+                    title: exemptionTitle,
+                    startDate: exemptionStartDate,
+                    endDate: exemptionEndDate,
+                    scope: exemptionScope,
+                    roomIds: selectedExemptionRooms,
+                    active: true,
+                    createdBy: 'admin',
+                    createdAt: ''
+                  },
+                  rooms,
+                  academicSchedule
+                )
+              : 0;
+
+            const overlappingExamBlocks = institutionalBlocks.filter(b => {
+              if (!exemptionStartDate || !exemptionEndDate) return false;
+              if (b.date < exemptionStartDate || b.date > exemptionEndDate) return false;
+              const r = rooms.find(room => room.id === b.roomId);
+              if (exemptionScope === 'ALL_ROOMS') return true;
+              if (exemptionScope === 'BILIK_KULIAH') return r?.category === 'Bilik Kuliah';
+              if (exemptionScope === 'SELECTED') return selectedExemptionRooms.includes(b.roomId);
+              return false;
+            });
+            const overlappingRoomIds = Array.from(new Set(overlappingExamBlocks.map(b => b.roomId)));
+
+            return (
+              <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <span className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Pratonton Impak Pengecualian</span>
+                  </span>
+                  <span className="text-[11px] text-slate-500">Pengiraan langsung</span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="bg-amber-50/70 border border-amber-200 rounded-lg p-2.5">
+                    <span className="text-[10px] font-bold uppercase text-amber-700 block">Tempoh</span>
+                    <strong className="text-base font-extrabold text-amber-900">
+                      {durationDays > 0 ? `${durationDays} Hari` : '–'}
+                    </strong>
+                  </div>
+
+                  <div className="bg-amber-50/70 border border-amber-200 rounded-lg p-2.5">
+                    <span className="text-[10px] font-bold uppercase text-amber-700 block">Bilik Terlibat</span>
+                    <strong className="text-base font-extrabold text-amber-900">
+                      {affectedRooms.length} Bilik
+                    </strong>
+                  </div>
+
+                  <div className="bg-amber-50/70 border border-amber-200 rounded-lg p-2.5">
+                    <span className="text-[10px] font-bold uppercase text-amber-700 block">Slot Hakiki Dilangkau</span>
+                    <strong className="text-base font-extrabold text-amber-900">
+                      {affectedSlots} Slot
+                    </strong>
+                  </div>
+                </div>
+
+                {overlappingExamBlocks.length > 0 && (
+                  <div className="bg-rose-50 border border-rose-300 rounded-xl p-3 text-xs text-rose-900 space-y-1">
+                    <div className="font-bold flex items-center gap-1.5 text-rose-800">
+                      <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>Pertindihan Sekatan Peperiksaan (Layer 3)</span>
+                    </div>
+                    <p className="text-[11.5px] leading-relaxed">
+                      ⚠️ Terdapat {overlappingRoomIds.length} bilik ({overlappingExamBlocks.length} sekatan) yang mempunyai sekatan peperiksaan/institusi pada tarikh ini. <strong>Peperiksaan TETAP BERKUATKUASA</strong> dan bilik ini tidak boleh ditempah adhoc pada waktu peperiksaan.
+                    </p>
+                  </div>
+                )}
+
+                {val.warnings.length > 0 && (
+                  <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 text-xs text-amber-900 space-y-1">
+                    <div className="font-bold flex items-center gap-1.5 text-amber-800">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>Peringatan Tarikh</span>
+                    </div>
+                    {val.warnings.map((w, idx) => (
+                      <p key={idx} className="text-[11.5px]">{w}</p>
+                    ))}
+                  </div>
+                )}
+
+                {!val.isValid && val.errors.length > 0 && (
+                  <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-xs text-rose-800 space-y-1">
+                    <div className="font-bold flex items-center gap-1.5">
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>Ralat Pengesahan</span>
+                    </div>
+                    {val.errors.map((err, idx) => (
+                      <p key={idx} className="text-[11.5px]">• {err}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Form Submit & Cancel Actions */}
+          <div className="flex items-center justify-end gap-2 pt-2">
+            {exemptionIdToEdit && (
+              <button
+                type="button"
+                onClick={resetExemptionForm}
+                className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-200 transition cursor-pointer"
+              >
+                Batal
+              </button>
+            )}
+
+            <button
+              type="submit"
+              disabled={isSavingExemption || Boolean(exemptionStartDate && exemptionEndDate && exemptionEndDate < exemptionStartDate)}
+              className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 px-5 rounded-xl text-xs transition flex items-center gap-2 shadow-md shadow-amber-600/20 active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Check className="w-4 h-4" />
+              <span>{exemptionIdToEdit ? 'Kemaskini Pengecualian' : 'Simpan Pengecualian'}</span>
+            </button>
+          </div>
+        </form>
+
+        {/* Senarai Pengecualian Sedia Ada */}
+        <div className="space-y-3 pt-2">
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600">
+              Rekod Pengecualian Sedia Ada ({exemptionList.length})
+            </h4>
+            <span className="text-[11px] text-slate-400">
+              {exemptionList.filter(e => e.active).length} Aktif / {exemptionList.filter(e => !e.active).length} Dinyahaktifkan
+            </span>
+          </div>
+
+          {exemptionList.length === 0 ? (
+            <div className="text-center py-8 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+              <Calendar className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+              <p className="text-xs font-bold text-slate-600">Tiada Pengecualian Jadual Hakiki Ditetapkan</p>
+              <p className="text-[11px] text-slate-400 mt-1 max-w-sm mx-auto">
+                Borang di atas boleh digunakan untuk menetapkan tempoh Study Week supaya pensyarah boleh menempah bilik kuliah.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+              {exemptionList.map(ex => {
+                const today = new Date().toISOString().slice(0, 10);
+                const isCurrentlyActive = ex.active && today >= ex.startDate && today <= ex.endDate;
+                const isUpcoming = ex.active && today < ex.startDate;
+                const isExpired = ex.active && today > ex.endDate;
+                const slotsCount = countAffectedAcademicSlots(ex, rooms, academicSchedule);
+
+                let scopeLabel = 'Semua Bilik';
+                if (ex.scope === 'BILIK_KULIAH') {
+                  scopeLabel = `Bilik Kuliah (${rooms.filter(r => r.category === 'Bilik Kuliah').length} Bilik)`;
+                } else if (ex.scope === 'SELECTED') {
+                  scopeLabel = `${ex.roomIds?.length || 0} Bilik Tertentu`;
+                }
+
+                return (
+                  <div
+                    key={ex.id}
+                    className={`rounded-2xl p-4 border transition-all space-y-3 relative ${
+                      !ex.active
+                        ? 'bg-slate-50 border-slate-200 opacity-75'
+                        : isCurrentlyActive
+                        ? 'bg-amber-50/40 border-amber-300 shadow-sm ring-1 ring-amber-300'
+                        : 'bg-white border-slate-200 shadow-xs'
+                    }`}
+                  >
+                    {/* Header: Title & Status Badge */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h5 className="font-extrabold text-sm text-slate-900 leading-snug">
+                          {ex.title}
+                        </h5>
+                        <p className="text-[11px] text-slate-500 mt-0.5 font-mono">
+                          {ex.startDate} hingga {ex.endDate}
+                        </p>
+                      </div>
+
+                      {/* Status Badge */}
+                      <div>
+                        {!ex.active ? (
+                          <span className="bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                            Dinyahaktifkan
+                          </span>
+                        ) : isCurrentlyActive ? (
+                          <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-extrabold px-2 py-0.5 rounded-full inline-flex items-center gap-1.5 animate-pulse">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                            Sedang Berkuatkuasa
+                          </span>
+                        ) : isUpcoming ? (
+                          <span className="bg-blue-50 text-blue-800 border border-blue-200 text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                            Akan Datang
+                          </span>
+                        ) : (
+                          <span className="bg-slate-100 text-slate-600 border border-slate-200 text-[10px] font-semibold px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                            Tamat
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Meta info */}
+                    <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 bg-white/70 p-2.5 rounded-xl border border-slate-100">
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block">Skop Bilik</span>
+                        <span className="font-semibold text-slate-800 text-[11px]">{scopeLabel}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block">Slot Hakiki Dilangkau</span>
+                        <span className="font-bold text-amber-700 text-[11px]">{slotsCount} Slot</span>
+                      </div>
+                    </div>
+
+                    {ex.reason && (
+                      <p className="text-[11px] text-slate-500 bg-slate-50 p-2 rounded-lg italic">
+                        "{ex.reason}"
+                      </p>
+                    )}
+
+                    <div className="flex items-center justify-between text-[10.5px] text-slate-400 border-t border-slate-100 pt-2">
+                      <span>Dicipta oleh {ex.createdBy}</span>
+                      <span>{ex.createdAt ? ex.createdAt.slice(0, 10) : '–'}</span>
+                    </div>
+
+                    {/* Actions bar */}
+                    <div className="flex flex-wrap items-center justify-end gap-1.5 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleExemptionActive(ex.id)}
+                        className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition cursor-pointer flex items-center gap-1 ${
+                          ex.active
+                            ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                            : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
+                        }`}
+                        title={ex.active ? 'Nyahaktifkan sementara' : 'Aktifkan semula'}
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>{ex.active ? 'Nyahaktif' : 'Aktifkan'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleEditExemption(ex)}
+                        className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 text-[11px] font-bold px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center gap-1"
+                        title="Edit tetapan pengecualian ini"
+                      >
+                        <Edit2 className="w-3 h-3 text-slate-600" />
+                        <span>Edit</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDuplicateExemption(ex)}
+                        className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 text-[11px] font-bold px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center gap-1"
+                        title="Salin tetapan untuk semester seterusnya"
+                      >
+                        <Copy className="w-3 h-3 text-amber-600" />
+                        <span>Gandakan</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirmExemptionId(ex.id)}
+                        className="bg-rose-50 hover:bg-rose-600 hover:text-white text-rose-700 border border-rose-200 text-[11px] font-bold px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center gap-1"
+                        title="Padam rekod pengecualian ini"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Padam</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Modal Pengesahan Simpan Pengecualian */}
+        {showConfirmModal && pendingExemptionToSave && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center text-amber-700 shrink-0">
+                  <CalendarRange className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Pengesahan Pengecualian Jadual</h3>
+                  <span className="text-xs text-amber-700 font-semibold">{pendingExemptionToSave.title}</span>
+                </div>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-xs text-amber-950 space-y-2">
+                <p className="font-semibold leading-relaxed">
+                  Pensyarah akan dapat menempah bilik pada <strong>{pendingExemptionToSave.startDate}</strong> hingga <strong>{pendingExemptionToSave.endDate}</strong> walaupun ada jadual hakiki. Teruskan?
+                </p>
+                <div className="text-[11px] text-amber-800 space-y-0.5 pt-1 border-t border-amber-200">
+                  <p>• Skop: <strong>{pendingExemptionToSave.scope}</strong></p>
+                  <p>• Sekatan Peperiksaan (Layer 3) dan tempahan lain kekal dikuatkuasakan.</p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmModal(false)}
+                  disabled={isSavingExemption}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmSaveExemption}
+                  disabled={isSavingExemption}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 transition flex items-center gap-2 shadow-md shadow-amber-600/20 cursor-pointer disabled:opacity-50"
+                >
+                  {isSavingExemption ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  <span>{isSavingExemption ? 'Menyimpan...' : 'Sahkan & Simpan'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Pengesahan Padam Pengecualian */}
+        {deleteConfirmExemptionId && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center text-rose-600 shrink-0">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Padam Pengecualian?</h3>
+                  <span className="text-xs text-rose-600 font-semibold">Tindakan ini tidak boleh diundur</span>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Adakah anda pasti ingin memadamkan rekod pengecualian ini? Jadual hakiki akan mula berkuatkuasa semula serta-merta pada tarikh tersebut.
+              </p>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setDeleteConfirmExemptionId(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteExemption(deleteConfirmExemptionId)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 transition shadow-md shadow-rose-600/20 cursor-pointer"
+                >
+                  Padam Sekarang
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* SECTION: AD-HOC BOOKINGS BACKUP & CSV EXPORT */}

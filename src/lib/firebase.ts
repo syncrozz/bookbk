@@ -16,9 +16,10 @@ import {
   getDocFromServer,
   runTransaction,
   Firestore,
-  setLogLevel
+  setLogLevel,
+  serverTimestamp
 } from 'firebase/firestore';
-import { AdHocBooking, Room, AcademicScheduleSlot, InstitutionalBlock, StaffUser } from '../types';
+import { AdHocBooking, Room, AcademicScheduleSlot, InstitutionalBlock, StaffUser, AcademicExemption } from '../types';
 import { INITIAL_ROOMS, INITIAL_ACADEMIC_SCHEDULE, INITIAL_ADHOC_BOOKINGS, INITIAL_INSTITUTIONAL_BLOCKS } from '../data/initialData';
 import { INITIAL_STAFF_DATA } from '../data/staffData';
 import { 
@@ -35,7 +36,9 @@ import {
   dequeuePendingBooking,
   updatePendingBookingInQueue,
   updateStoredBooking,
-  mergeCloudBookingsWithPendingQueue
+  mergeCloudBookingsWithPendingQueue,
+  getStoredAcademicExemptions,
+  saveStoredAcademicExemptions
 } from '../utils/storage';
 import { generateBookingIdempotencyKey, isSlotOverlapping } from '../utils/idempotency';
 import { matchStaffByEmail } from '../utils/staff-matcher';
@@ -367,17 +370,36 @@ export function normalizeStaffUser(st: any): StaffUser {
 }
 
 /**
- * Remove any undefined values from an object before sending to Firestore
- * (Firestore throws "Unsupported field value: undefined" if undefined is present)
+ * Remove any undefined values from an object, array, or nested structure before sending to Firestore
+ * (Firestore throws "Unsupported field value: undefined" if undefined is present in any field or array item)
  */
-export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): Record<string, any> {
-  const clean: Record<string, any> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (value !== undefined) {
-      clean[key] = value;
-    }
+export function sanitizeForFirestore<T>(data: T): any {
+  if (data === null || data === undefined) {
+    return null;
   }
-  return clean;
+  if (Array.isArray(data)) {
+    return data
+      .filter((item) => item !== undefined)
+      .map((item) => sanitizeForFirestore(item));
+  }
+  if (typeof data === 'object') {
+    // Preserve special Firestore objects (FieldValue, serverTimestamp, Timestamp, etc.)
+    if (
+      (data as any)._methodName ||
+      typeof (data as any).toMillis === 'function' ||
+      (data.constructor && data.constructor.name !== 'Object')
+    ) {
+      return data;
+    }
+    const clean: Record<string, any> = {};
+    for (const [key, value] of Object.entries(data as Record<string, any>)) {
+      if (value !== undefined) {
+        clean[key] = sanitizeForFirestore(value);
+      }
+    }
+    return clean;
+  }
+  return data;
 }
 
 /**
@@ -1484,10 +1506,32 @@ export function subscribeToSchedule(onUpdate: (schedule: AcademicScheduleSlot[])
         return;
       }
       hasLoadedScheduleOnce = true;
-      const schedule: AcademicScheduleSlot[] = [];
-      snapshot.forEach((docSnap) => {
-        schedule.push(docSnap.data() as AcademicScheduleSlot);
+      const rawSchedule: AcademicScheduleSlot[] = [];
+      snapshot.forEach((docSnap: any) => {
+        rawSchedule.push(docSnap.data() as AcademicScheduleSlot);
       });
+
+      // Deduplicate slots in-memory by unique roomId, dayOfWeek, and startTime
+      const uniqueMap = new Map<string, AcademicScheduleSlot>();
+      rawSchedule.forEach((slot) => {
+        const key = `${(slot.roomId || '').toUpperCase()}|${slot.dayOfWeek}|${slot.startTime}`;
+        if (!uniqueMap.has(key)) {
+          uniqueMap.set(key, slot);
+        } else {
+          const existing = uniqueMap.get(key)!;
+          const isMaster = slot.id && slot.id.startsWith('SCH-CSV-17931762568');
+          const existingIsMaster = existing.id && existing.id.startsWith('SCH-CSV-17931762568');
+          if (isMaster && !existingIsMaster) {
+            uniqueMap.set(key, slot);
+          } else if (
+            (!existing.lecturerName || existing.lecturerName === 'Pensyarah KPMBP') &&
+            slot.lecturerName && slot.lecturerName !== 'Pensyarah KPMBP'
+          ) {
+            uniqueMap.set(key, slot);
+          }
+        }
+      });
+      const schedule = Array.from(uniqueMap.values());
       onUpdate(schedule);
     }, (error) => {
       reportSnapshotFallbackError(SCHEDULE_COLLECTION, error);
@@ -1585,6 +1629,50 @@ export async function clearAllScheduleFromCloud(): Promise<void> {
 }
 
 /**
+ * Permanently purge redundant duplicate schedule slots in Cloud Firestore.
+ * Keeps only 1 authoritative document per (roomId + dayOfWeek + startTime).
+ */
+export async function deduplicateScheduleInCloud(): Promise<{ kept: number; deleted: number }> {
+  invalidateStaticCache(SCHEDULE_COLLECTION);
+  const colRef = collection(db, SCHEDULE_COLLECTION);
+  const snap = await getDocs(colRef);
+
+  const uniqueMap = new Map<string, string>(); // key -> docId to keep
+  const idsToDelete: string[] = [];
+
+  // Sort docs so master 591 batch (17931762568) or detailed records are preferred
+  const sortedDocs = snap.docs.slice().sort((a, b) => {
+    const isMasterA = a.id.startsWith('SCH-CSV-17931762568');
+    const isMasterB = b.id.startsWith('SCH-CSV-17931762568');
+    if (isMasterA && !isMasterB) return -1;
+    if (!isMasterA && isMasterB) return 1;
+    return 0;
+  });
+
+  sortedDocs.forEach((docSnap) => {
+    const data = docSnap.data() as AcademicScheduleSlot;
+    const key = `${(data.roomId || '').toUpperCase()}|${data.dayOfWeek}|${data.startTime}`;
+    if (!uniqueMap.has(key)) {
+      uniqueMap.set(key, docSnap.id);
+    } else {
+      idsToDelete.push(docSnap.id);
+    }
+  });
+
+  for (let i = 0; i < idsToDelete.length; i += 400) {
+    const chunk = idsToDelete.slice(i, i + 400);
+    const batch = writeBatch(db);
+    chunk.forEach((id) => {
+      batch.delete(doc(db, SCHEDULE_COLLECTION, id));
+    });
+    await batch.commit();
+  }
+
+  console.log(`Deduplicated Cloud schedule: kept ${uniqueMap.size}, deleted ${idsToDelete.length} duplicates.`);
+  return { kept: uniqueMap.size, deleted: idsToDelete.length };
+}
+
+/**
  * Save or update a single Academic Schedule slot in Cloud Firestore.
  */
 export async function saveScheduleSlotToCloud(slot: AcademicScheduleSlot): Promise<void> {
@@ -1607,7 +1695,7 @@ async function seedInitialSchedule() {
     const batch = writeBatch(db);
     INITIAL_ACADEMIC_SCHEDULE.forEach((slot) => {
       const ref = doc(db, SCHEDULE_COLLECTION, slot.id);
-      batch.set(ref, slot);
+      batch.set(ref, sanitizeForFirestore(slot));
     });
     await batch.commit();
   } catch (err) {
@@ -1802,4 +1890,150 @@ export async function getDirectFirestoreRoomsCount(): Promise<{ count: number; i
     return { count: -1, ids: [], error: err?.message || String(err) };
   }
 }
+
+const METADATA_COLLECTION = 'metadata';
+const APP_VERSION_DOC_ID = 'appVersion';
+
+/**
+ * Berlangganan dokumen metadata/appVersion secara real-time untuk menerima kemas kini versi platform.
+ * Pulangkan fungsi unsubscribe.
+ */
+export function subscribeToAppVersion(onUpdate: (label: string | null) => void): () => void {
+  try {
+    const docRef = doc(db, METADATA_COLLECTION, APP_VERSION_DOC_ID);
+    const unsubscribe = onSnapshot(
+      docRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          const label = typeof data?.label === 'string' ? data.label.trim() : null;
+          onUpdate(label);
+        } else {
+          onUpdate(null);
+        }
+      },
+      (error) => {
+        console.warn('subscribeToAppVersion fallback to local:', error);
+        onUpdate(null);
+      }
+    );
+    return unsubscribe;
+  } catch (err) {
+    console.warn('subscribeToAppVersion setup error:', err);
+    onUpdate(null);
+    return () => {};
+  }
+}
+
+/**
+ * Menyimpan nilai versi platform ke dokumen metadata/appVersion di Firestore (khusus admin).
+ */
+export async function saveAppVersionToCloud(label: string): Promise<void> {
+  const cleanLabel = label.trim();
+  const docRef = doc(db, METADATA_COLLECTION, APP_VERSION_DOC_ID);
+  try {
+    await setDoc(docRef, {
+      label: cleanLabel,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  } catch (err: any) {
+    console.error('saveAppVersionToCloud failed:', err);
+    const code = err?.code || '';
+    if (code === 'permission-denied') {
+      throw new Error('Akses ditolak: Hanya Pentadbir (Admin) yang disahkan boleh menyunting versi.');
+    }
+    throw new Error(err?.message || 'Gagal menyimpan versi ke Cloud Firestore.');
+  }
+}
+
+export const ACADEMIC_EXEMPTIONS_DOC_ID = 'academicExemptions';
+
+/**
+ * Berlangganan dokumen metadata/academicExemptions secara real-time.
+ * Data disimpan dalam medan 'items' (tatasusunan AcademicExemption).
+ * Fallback lancar ke localStorage sekiranya luar talian atau ralat.
+ */
+export function subscribeToAcademicExemptions(onUpdate: (list: AcademicExemption[]) => void): () => void {
+  try {
+    const docRef = doc(db, METADATA_COLLECTION, ACADEMIC_EXEMPTIONS_DOC_ID);
+    const unsubscribe = onSnapshot(
+      docRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          recordSnapshotSuccess(METADATA_COLLECTION);
+          const data = snapshot.data();
+          const items = Array.isArray(data?.items) ? data.items : [];
+          saveStoredAcademicExemptions(items);
+          onUpdate(items);
+        } else {
+          recordSnapshotSuccess(METADATA_COLLECTION);
+          const local = getStoredAcademicExemptions();
+          onUpdate(local);
+        }
+      },
+      (error) => {
+        reportSnapshotFallbackError(METADATA_COLLECTION, error);
+        console.warn('subscribeToAcademicExemptions fallback to local:', error);
+        onUpdate(getStoredAcademicExemptions());
+      }
+    );
+    return unsubscribe;
+  } catch (err) {
+    reportSnapshotFallbackError(METADATA_COLLECTION, err);
+    console.warn('subscribeToAcademicExemptions setup error:', err);
+    onUpdate(getStoredAcademicExemptions());
+    return () => {};
+  }
+}
+
+/**
+ * Membersihkan objek AcademicExemption agar tiada medan 'undefined' dihantar ke Firestore
+ * (cth: roomIds atau reason yang kosong).
+ */
+export function sanitizeAcademicExemption(item: AcademicExemption): Record<string, any> {
+  const clean: Record<string, any> = {
+    id: item.id,
+    title: item.title,
+    startDate: item.startDate,
+    endDate: item.endDate,
+    scope: item.scope,
+    active: item.active !== false,
+    createdBy: item.createdBy || 'Admin KPMBP',
+    createdAt: item.createdAt || new Date().toISOString(),
+  };
+
+  if (item.scope === 'SELECTED' && Array.isArray(item.roomIds) && item.roomIds.length > 0) {
+    clean.roomIds = item.roomIds;
+  }
+  if (item.reason && item.reason.trim()) {
+    clean.reason = item.reason.trim();
+  }
+  return clean;
+}
+
+/**
+ * Menyimpan senarai pengecualian akademik ke dokumen metadata/academicExemptions di Firestore (khusus admin).
+ */
+export async function saveAcademicExemptionsToCloud(list: AcademicExemption[]): Promise<void> {
+  const docRef = doc(db, METADATA_COLLECTION, ACADEMIC_EXEMPTIONS_DOC_ID);
+  
+  // Sanitasi setiap item bagi menghalang sebarang medan undefined dihantar ke Firestore
+  const sanitizedList = list.map((item) => sanitizeAcademicExemption(item));
+  saveStoredAcademicExemptions(sanitizedList as AcademicExemption[]);
+  try {
+    await setDoc(docRef, {
+      items: sanitizedList,
+      updatedAt: serverTimestamp(),
+      updatedBy: 'admin',
+    }, { merge: true });
+  } catch (err: any) {
+    console.error('saveAcademicExemptionsToCloud failed:', err);
+    const code = err?.code || '';
+    if (code === 'permission-denied') {
+      throw new Error('Akses ditolak: Hanya Pentadbir (Admin) yang disahkan boleh menyunting pengecualian jadual hakiki.');
+    }
+    throw new Error(err?.message || 'Gagal menyimpan pengecualian ke Cloud Firestore (disimpan secara tempatan).');
+  }
+}
+
 

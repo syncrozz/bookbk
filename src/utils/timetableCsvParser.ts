@@ -388,9 +388,12 @@ export function parseTimetableCSV(csvText: string, existingRooms: Room[]): Parse
         }
 
         const parsedDetails = parseCellAcademicDetails(cellValue);
+        const cleanRoom = roomId.replace(/[^a-zA-Z0-9_-]/g, '_');
+        const cleanStart = timeSlot.startTime.replace(/[^a-zA-Z0-9]/g, '');
+        const cleanEnd = timeSlot.endTime.replace(/[^a-zA-Z0-9]/g, '');
 
         validSlots.push({
-          id: `SCH-CSV-${Date.now()}-${slotCounter++}`,
+          id: `SCH-${cleanRoom}-${dayOfWeek}-${cleanStart}-${cleanEnd}`,
           roomId,
           dayOfWeek,
           startTime: timeSlot.startTime,
@@ -486,9 +489,12 @@ export function parseTimetableCSV(csvText: string, existingRooms: Room[]): Parse
       }
 
       const parsedDetails = parseCellAcademicDetails(nilaiAsal);
+      const cleanRoom = finalRoomId.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const cleanStart = startTime.replace(/[^a-zA-Z0-9]/g, '');
+      const cleanEnd = endTime.replace(/[^a-zA-Z0-9]/g, '');
 
       validSlots.push({
-        id: `SCH-CSV-${Date.now()}-${slotCounter++}`,
+        id: `SCH-${cleanRoom}-${dayOfWeek}-${cleanStart}-${cleanEnd}`,
         roomId: finalRoomId,
         dayOfWeek,
         startTime,
@@ -535,9 +541,12 @@ export function parseTimetableCSV(csvText: string, existingRooms: Room[]): Parse
       const startTime = formatTimeStr(rawStart);
       const endTime = rawEnd ? formatTimeStr(rawEnd) : `${String(parseInt(startTime.split(':')[0], 10) + 1).padStart(2, '0')}:${startTime.split(':')[1] || '00'}`;
       const roomId = resolveRoomId(rawRoom, '', existingRooms);
+      const cleanRoom = roomId.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const cleanStart = startTime.replace(/[^a-zA-Z0-9]/g, '');
+      const cleanEnd = endTime.replace(/[^a-zA-Z0-9]/g, '');
 
       validSlots.push({
-        id: `SCH-CSV-${Date.now()}-${slotCounter++}`,
+        id: `SCH-${cleanRoom}-${dayOfWeek}-${cleanStart}-${cleanEnd}`,
         roomId,
         dayOfWeek,
         startTime,

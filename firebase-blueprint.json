@@ -97,6 +97,39 @@
         "pinChangedAt": { "type": "string" }
       },
       "required": ["id", "name", "email", "pin"]
+    },
+    "metadata": {
+      "title": "Platform Metadata & Configuration",
+      "description": "System metadata including academic schedule exemptions (Study Week) and versioning",
+      "type": "object",
+      "properties": {
+        "academicExemptions": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": { "type": "string" },
+                  "title": { "type": "string" },
+                  "startDate": { "type": "string" },
+                  "endDate": { "type": "string" },
+                  "scope": { "type": "string", "enum": ["ALL_ROOMS", "BILIK_KULIAH", "SELECTED"] },
+                  "roomIds": { "type": "array", "items": { "type": "string" } },
+                  "reason": { "type": "string" },
+                  "active": { "type": "boolean" },
+                  "createdBy": { "type": "string" },
+                  "createdAt": { "type": "string" }
+                },
+                "required": ["id", "title", "startDate", "endDate", "scope", "active", "createdBy", "createdAt"]
+              }
+            },
+            "updatedAt": { "type": "string" },
+            "updatedBy": { "type": "string" }
+          }
+        }
+      }
     }
   },
   "security": {

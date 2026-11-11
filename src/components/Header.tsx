@@ -1,15 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { LoginUserCard } from './LoginUserCard';
 import { CloudSyncModal } from './CloudSyncModal';
 import { StaffUser } from '../types';
 import { getStoredActiveUser, clearActiveUser, subscribeToActiveUser } from '../utils/storage';
+import { APP_VERSION_LABEL } from '../config/version';
+import { subscribeToAppVersion, saveAppVersionToCloud } from '../lib/firebase';
 import { 
   Menu,
   X,
   User,
   ChevronDown,
   Cloud,
-  LogOut
+  LogOut,
+  Pencil,
+  Check,
+  Loader2
 } from 'lucide-react';
 
 export type ActiveTab = 'dashboard' | 'matrix' | 'academic' | 'mybookings' | 'directory' | 'admin';
@@ -37,6 +42,94 @@ export const Header: React.FC<HeaderProps> = ({
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [showCloudSyncModal, setShowCloudSyncModal] = useState(false);
   const [currentUser, setCurrentUser] = useState(() => getStoredActiveUser());
+
+  // Dynamic App Version (Firestore metadata/appVersion with fixed fallback)
+  const [cloudVersion, setCloudVersion] = useState<string | null>(null);
+  const [isEditingVersion, setIsEditingVersion] = useState(false);
+  const [editVersionInput, setEditVersionInput] = useState('');
+  const [isSavingVersion, setIsSavingVersion] = useState(false);
+  const [versionError, setVersionError] = useState<string | null>(null);
+  const versionInputRef = useRef<HTMLInputElement>(null);
+
+  const displayVersion = cloudVersion || APP_VERSION_LABEL;
+
+  useEffect(() => {
+    const unsubscribe = subscribeToAppVersion((label) => {
+      setCloudVersion(label);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isAdmin && isEditingVersion) {
+      setIsEditingVersion(false);
+      setVersionError(null);
+    }
+  }, [isAdmin, isEditingVersion]);
+
+  const handleStartEditingVersion = () => {
+    setEditVersionInput(displayVersion);
+    setVersionError(null);
+    setIsEditingVersion(true);
+    setTimeout(() => {
+      versionInputRef.current?.focus();
+      versionInputRef.current?.select();
+    }, 60);
+  };
+
+  const handleCancelEditingVersion = () => {
+    setIsEditingVersion(false);
+    setVersionError(null);
+  };
+
+  const handleSetCurrentTime = () => {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kuala_Lumpur',
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(now);
+    const getPart = (type: string) => parts.find((p) => p.type === type)?.value || '';
+    const day = getPart('day');
+    const month = getPart('month');
+    let hour = getPart('hour');
+    if (hour === '24') hour = '00';
+    const minute = getPart('minute');
+    setEditVersionInput(`v${day}.${month}.${hour}${minute}`);
+    setVersionError(null);
+  };
+
+  const handleSaveVersion = async () => {
+    let formatted = editVersionInput.trim();
+    if (!formatted.startsWith('v') && !formatted.startsWith('V')) {
+      formatted = 'v' + formatted;
+    } else if (formatted.startsWith('V')) {
+      formatted = 'v' + formatted.slice(1);
+    }
+
+    const isValid = /^v\d{2}\.\d{2}\.\d{4}$/.test(formatted);
+    if (!isValid) {
+      setVersionError('Format: v30.10.0855');
+      return;
+    }
+
+    setIsSavingVersion(true);
+    setVersionError(null);
+    try {
+      await saveAppVersionToCloud(formatted);
+      setIsEditingVersion(false);
+    } catch (err: any) {
+      setVersionError(err?.message || 'Gagal menyimpan versi ke Cloud Firestore.');
+    } finally {
+      setIsSavingVersion(false);
+    }
+  };
 
   useEffect(() => {
     const handleSync = () => {
@@ -74,8 +167,8 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 gap-3">
           
-          {/* 1. Left: Brand Logo & Title */}
-          <div className="flex items-center gap-3 shrink-0">
+          {/* 1. Left: Brand Logo, Title & Dynamic Version Tag */}
+          <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 flex-wrap">
             <button
               type="button"
               onClick={() => handleTabClick('matrix')}
@@ -89,16 +182,109 @@ export const Header: React.FC<HeaderProps> = ({
                   className="w-full h-full object-contain p-0.5"
                 />
               </div>
-              <div className="leading-tight">
+              <div className="flex items-center gap-2 leading-tight">
                 <span className="font-bold text-base tracking-tight">
                   <span className="text-white">Book</span>
                   <span className="text-blue-400">BK</span>
                 </span>
-                <span className="hidden sm:inline-block ml-2 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 bg-slate-800 text-blue-300 rounded border border-slate-700">
+                <span className="hidden sm:inline-block text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 bg-slate-800 text-blue-300 rounded border border-slate-700">
                   KPMBP
                 </span>
               </div>
             </button>
+
+            {/* Version Display & In-Place Admin Editor */}
+            {!isEditingVersion ? (
+              <div className="flex items-center">
+                <span
+                  id="header-version-tag"
+                  className="inline-flex items-center gap-1.5 text-[11px] font-mono tabular-nums text-slate-400 tracking-tight px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700/60 select-none shadow-xs"
+                  title={`Versi Platform: ${displayVersion}${isAdmin ? ' (Klik pensel untuk sunting)' : ''}`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
+                  <span>{displayVersion}</span>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleStartEditingVersion();
+                      }}
+                      className="ml-0.5 p-0.5 text-slate-400 hover:text-white rounded hover:bg-slate-700 transition cursor-pointer"
+                      title="Sunting versi platform (Admin)"
+                      aria-label="Sunting versi"
+                    >
+                      <Pencil className="w-3 h-3 text-slate-400 hover:text-white" />
+                    </button>
+                  )}
+                </span>
+              </div>
+            ) : (
+              <div className="relative flex items-center z-50">
+                <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800 border border-blue-500 shadow-lg shadow-black/40">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0"></span>
+                  <input
+                    ref={versionInputRef}
+                    type="text"
+                    value={editVersionInput}
+                    onChange={(e) => {
+                      setEditVersionInput(e.target.value);
+                      if (versionError) setVersionError(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSaveVersion();
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        handleCancelEditingVersion();
+                      }
+                    }}
+                    disabled={isSavingVersion}
+                    className="w-24 bg-slate-900 text-white font-mono text-[11px] px-1 py-0.5 rounded border border-slate-700 focus:outline-none focus:border-blue-400 tabular-nums"
+                    placeholder="v30.10.0855"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveVersion}
+                    disabled={isSavingVersion}
+                    className="p-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white transition disabled:opacity-50 cursor-pointer"
+                    title="Simpan Versi (Enter)"
+                    aria-label="Simpan"
+                  >
+                    {isSavingVersion ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Check className="w-3 h-3" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelEditingVersion}
+                    disabled={isSavingVersion}
+                    className="p-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition disabled:opacity-50 cursor-pointer"
+                    title="Batal (Esc)"
+                    aria-label="Batal"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSetCurrentTime}
+                    disabled={isSavingVersion}
+                    className="hidden xs:inline-block sm:inline-block px-1.5 py-0.5 rounded bg-blue-900/70 hover:bg-blue-800 text-blue-200 text-[10px] border border-blue-700/50 transition cursor-pointer shrink-0 font-sans"
+                    title="Gunakan masa sekarang (Asia/Kuala_Lumpur)"
+                  >
+                    Guna masa sekarang
+                  </button>
+                </div>
+                {versionError && (
+                  <div className="absolute top-full left-0 mt-1 px-2 py-0.5 bg-rose-950 border border-rose-600 text-rose-200 text-[10px] rounded shadow-md whitespace-nowrap z-50">
+                    {versionError}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Navigasi bahagian atas dipadamkan kerana fungsi navigasi telah disediakan oleh QuickNavGrid di bahagian bawah */}

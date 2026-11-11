@@ -5,13 +5,15 @@ import {
   AdHocBooking, 
   StaffUser,
   AcademicScheduleSlot,
-  InstitutionalBlock 
+  InstitutionalBlock,
+  AcademicExemption
 } from '../types';
 import { 
   formatDateMalay, 
   getMalayDayOfWeek, 
   calculateDurationText, 
   checkRoomAvailability,
+  findActiveExemption,
   parseTimeMinutes 
 } from '../utils/availabilityEngine';
 import { 
@@ -67,6 +69,7 @@ interface BookingModalProps {
   academicSchedule?: AcademicScheduleSlot[];
   adhocBookings?: AdHocBooking[];
   institutionalBlocks?: InstitutionalBlock[];
+  exemptions?: AcademicExemption[];
   isAdmin?: boolean;
   isFallbackMode?: boolean;
   onClose: () => void;
@@ -84,6 +87,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
   academicSchedule = [],
   adhocBookings = [],
   institutionalBlocks = [],
+  exemptions = [],
   isAdmin = false,
   isFallbackMode = false,
   onClose,
@@ -112,7 +116,8 @@ export const BookingModal: React.FC<BookingModalProps> = ({
           oneHourStr,
           academicSchedule,
           adhocBookings,
-          institutionalBlocks
+          institutionalBlocks,
+          exemptions
         );
         if (check.status === 'AVAILABLE') {
           return oneHourStr;
@@ -312,13 +317,15 @@ export const BookingModal: React.FC<BookingModalProps> = ({
       selectedEndTime,
       academicSchedule,
       adhocBookings,
-      institutionalBlocks
+      institutionalBlocks,
+      exemptions
     );
     return {
       date: d,
       day: getMalayDayOfWeek(d),
       isAvailable: check.status === 'AVAILABLE',
-      conflictReason: check.conflictReason
+      conflictReason: check.conflictReason,
+      academicExemption: check.academicExemption
     };
   });
   const allDatesAvailable = datesStatus.every(d => d.isAvailable);
@@ -349,7 +356,8 @@ export const BookingModal: React.FC<BookingModalProps> = ({
             endStr,
             academicSchedule,
             adhocBookings,
-            institutionalBlocks
+            institutionalBlocks,
+            exemptions
           );
           if (check.status !== 'AVAILABLE') {
             isAvailable = false;
@@ -395,7 +403,8 @@ export const BookingModal: React.FC<BookingModalProps> = ({
             t,
             academicSchedule,
             adhocBookings,
-            institutionalBlocks
+            institutionalBlocks,
+            exemptions
           );
           if (check.status !== 'AVAILABLE') {
             isAvailable = false;
@@ -432,7 +441,8 @@ export const BookingModal: React.FC<BookingModalProps> = ({
           selectedEndTime,
           academicSchedule,
           adhocBookings,
-          institutionalBlocks
+          institutionalBlocks,
+          exemptions
         );
         if (availCheck.status !== 'AVAILABLE') {
           setVerificationError(`Pertembungan pada ${formatDateMalay(d)} (${getMalayDayOfWeek(d)}): ${availCheck.conflictReason || 'Slot tidak tersedia.'}`);
@@ -517,6 +527,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
 
     if (isMultiDay && activeDates.length > 1) {
       const seriesBookings = activeDates.map((d, index) => {
+        const activeEx = findActiveExemption(room, d, exemptions);
         const itemParams = {
           roomId: room.id,
           roomName: room.name,
@@ -533,7 +544,8 @@ export const BookingModal: React.FC<BookingModalProps> = ({
           paxCount,
           notes: consolidatedNotes
             ? `${consolidatedNotes} [Siri Hari ${index + 1}/${activeDates.length}]`
-            : `Siri Tempahan ${activeDates.length} Hari (${formatDateMalay(startDate)} - ${formatDateMalay(endDate)})`
+            : `Siri Tempahan ${activeDates.length} Hari (${formatDateMalay(startDate)} - ${formatDateMalay(endDate)})`,
+          ...(activeEx ? { academicExemptionId: activeEx.id } : {})
         };
         return {
           ...itemParams,
@@ -542,10 +554,12 @@ export const BookingModal: React.FC<BookingModalProps> = ({
       });
       onSubmitBooking(seriesBookings);
     } else {
+      const targetDate = activeDates[0] || date;
+      const activeEx = findActiveExemption(room, targetDate, exemptions);
       const singleParams = {
         roomId: room.id,
         roomName: room.name,
-        date: activeDates[0] || date,
+        date: targetDate,
         startTime: selectedStartTime,
         endTime: selectedEndTime,
         applicantName: finalApplicantName,
@@ -556,7 +570,8 @@ export const BookingModal: React.FC<BookingModalProps> = ({
         purposeCategory: effectivePurpose,
         title: `${effectivePurpose} (${room.code})`,
         paxCount,
-        notes: consolidatedNotes || undefined
+        notes: consolidatedNotes || undefined,
+        ...(activeEx ? { academicExemptionId: activeEx.id } : {})
       };
       onSubmitBooking({
         ...singleParams,
@@ -718,6 +733,11 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                     <div className="text-[9.5px] opacity-80 mt-1">
                       {ds.day}: {selectedStartTime} – {selectedEndTime}
                     </div>
+                    {ds.academicExemption && ds.isAvailable && (
+                      <span className="text-[9px] bg-emerald-200 text-emerald-950 px-1.5 py-0.5 rounded font-bold mt-1 inline-block self-start">
+                        📚 Study Week
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -731,6 +751,15 @@ export const BookingModal: React.FC<BookingModalProps> = ({
             ? 'bg-slate-900 border-indigo-500/50 text-white' 
             : 'bg-slate-900 border-slate-800 text-white'
         }`}>
+          {activeDates.some(d => !!findActiveExemption(room, d, exemptions)) && (
+            <div className="bg-emerald-950/80 border border-emerald-500/60 rounded-lg p-2.5 flex items-center gap-2 text-emerald-200 text-xs">
+              <span className="text-base">📚</span>
+              <span>
+                <strong className="font-bold text-emerald-300">Dikecualikan daripada jadual hakiki (Study Week):</strong> Slot jadual hakiki tidak menghalang tempahan pada tempoh ini.
+              </span>
+            </div>
+          )}
+
           <div className="flex items-center justify-between">
             <span className="text-blue-400 font-bold flex items-center gap-1">
               <Sparkles className="w-3.5 h-3.5" /> Ruang Disahkan Available

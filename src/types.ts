@@ -67,6 +67,20 @@ export interface AdHocBooking {
   syncError?: string;
   syncedAt?: string;
   idempotencyKey?: string;
+  academicExemptionId?: string;
+}
+
+export interface AcademicExemption {
+  id: string;                 // e.g. 'EX-20261109-001'
+  title: string;              // e.g. 'Study Week Semester Nov 2026'
+  startDate: string;          // YYYY-MM-DD (inklusif)
+  endDate: string;            // YYYY-MM-DD (inklusif)
+  scope: 'ALL_ROOMS' | 'BILIK_KULIAH' | 'SELECTED';
+  roomIds?: string[];         // hanya untuk scope 'SELECTED'
+  reason?: string;
+  active: boolean;            // admin boleh matikan tanpa memadam
+  createdBy: string;
+  createdAt: string;
 }
 
 export interface InstitutionalBlock {
@@ -93,6 +107,7 @@ export interface RoomAvailabilityCheck {
   academicSlot?: AcademicScheduleSlot;
   existingBooking?: AdHocBooking;
   institutionalBlock?: InstitutionalBlock;
+  academicExemption?: AcademicExemption;
   conflictReason?: string;
 }
 
