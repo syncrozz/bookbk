@@ -115,12 +115,12 @@ export const INITIAL_ROOMS: Room[] = [
     notes: 'Makmal komputer untuk penyelidikan data dan bengkel teknologi'
   },
 
-  // Dewan Kuliah & Dewan Utama
+  // Dewan Kuliah & Dewan Utama (Di bawah kategori Ruang Khas)
   {
     id: 'DEWAN_BESAR',
     code: 'DEWAN BESAR',
     name: 'Dewan Besar (Dewan Utama)',
-    category: 'Dewan Kuliah',
+    category: 'Ruang Khas',
     capacity: 500,
     block: 'Bangunan Pentadbiran & Dewan Utama',
     level: 'Ground Floor',
@@ -141,7 +141,7 @@ export const INITIAL_ROOMS: Room[] = [
     id: 'SRI_PENAWAR',
     code: 'SRI PENAWAR',
     name: 'Dewan Sri Penawar',
-    category: 'Dewan Kuliah',
+    category: 'Ruang Khas',
     capacity: 150,
     block: 'Bangunan Akademik Utama',
     level: 1,
@@ -161,7 +161,7 @@ export const INITIAL_ROOMS: Room[] = [
     id: 'DKA',
     code: 'DKA',
     name: 'DKA',
-    category: 'Dewan Kuliah',
+    category: 'Ruang Khas',
     capacity: 120,
     block: 'Bangunan Akademik Utama',
     level: 2,
@@ -174,7 +174,7 @@ export const INITIAL_ROOMS: Room[] = [
     id: 'DKB',
     code: 'DKB',
     name: 'DKB',
-    category: 'Dewan Kuliah',
+    category: 'Ruang Khas',
     capacity: 120,
     block: 'Bangunan Akademik Utama',
     level: 2,

@@ -17,14 +17,14 @@ export const ROOMS_CSV_HEADERS = [
 ];
 
 export const SAMPLE_ROOMS_CSV_TEMPLATE = `id,code,name,category,capacity,block,level,facilities,hasAircond,isSmartClassroom,notes
-DEWAN_BESAR,DEWAN BESAR,Dewan Besar (Dewan Utama),Dewan Kuliah,500,Bangunan Pentadbiran & Dewan Utama,Ground Floor,Pentas Utama & Tirai Bermotor; Sistem PA Audio Profesional; Dual Skrin Projektor LED; Pendingin Hawa Pusat; Kapasiti 500 Kerusi,true,false,Dewan Utama serbaguna untuk majlis rasmi seminar kebangsaan dan program petang & malam (4pm-11pm)
+DEWAN_BESAR,DEWAN BESAR,Dewan Besar (Dewan Utama),Ruang Khas,500,Bangunan Pentadbiran & Dewan Utama,Ground Floor,Pentas Utama & Tirai Bermotor; Sistem PA Audio Profesional; Dual Skrin Projektor LED; Pendingin Hawa Pusat; Kapasiti 500 Kerusi,true,false,Dewan Utama serbaguna untuk majlis rasmi seminar kebangsaan dan program petang & malam (4pm-11pm)
 MAKMAL_GAMMA,LAB GAMMA,LAB GAMMA,Makmal Komputer,35,Pusat Komputer & IT,1st Floor,35x PC Komputer; Projektor HD; Pendingin Hawa Pusat; Rangkaian Gigabit LAN; Papan Putih,true,false,Makmal komputer untuk pembangunan perisian dan reka bentuk
 MAKMAL_ALFA,LAB ALFA,LAB ALFA,Makmal Komputer,35,Pusat Komputer & IT,1st Floor,35x PC Komputer Berprestasi Tinggi; Projektor HD & Skrin Bermotor; Pendingin Hawa Pusat; Rangkaian Gigabit LAN,true,false,Makmal komputer utama untuk praktikal pengaturcaraan
 MAKMAL_SIGMA,LAB SIGMA,LAB SIGMA,Makmal Komputer,35,Pusat Komputer & IT,Ground Floor,35x PC Komputer; Projektor HD; Pendingin Hawa Pusat; Rangkaian Gigabit LAN; Papan Putih,true,false,Makmal komputer multimedia dan sistem maklumat perniagaan
 MAKMAL_BETA,LAB BETA,LAB BETA,Makmal Komputer,35,Pusat Komputer & IT,Ground Floor,35x PC Komputer; Projektor HD; Pendingin Hawa Pusat; Rangkaian Gigabit LAN; Papan Putih,true,false,Makmal komputer untuk kelas pengkomputeran dan latihan staf
 BK01,S. CLASSROOM,Smart Classroom,Bilik Kuliah,35,Bangunan Akademik Utama,Ground Floor,Papan Pintar (Smartboard); Projektor HD; Pendingin Hawa; Sistem Audio Hibrid,true,true,Bilik kuliah pintar dengan fasiliti hibrid dan skrin interaktif
 BILIK_INKUBATOR,BLK. INKUBATOR,Bilik Inkubator,Ruang Khas,25,Bangunan Pentadbiran & Inovasi,Ground Floor,Meja Perbincangan Kumpulan; Pendingin Hawa; Papan Putih Kaca; Wi-Fi Kelajuan Tinggi; Palam Kuasa,true,false,Pusat inkubator keusahawanan dan inovasi pelajar/staf
-DKA,DKA,DKA,Dewan Kuliah,120,Bangunan Akademik Utama,2nd Floor,Dual Projektor HD; Kerusi Bertingkat (Auditorium); Sistem Audio Dewan; Pendingin Hawa Pusat; Papan Pintar,true,false,Sesuai untuk kuliah gabungan kelas besar dan taklimat program
+DKA,DKA,DKA,Ruang Khas,120,Bangunan Akademik Utama,2nd Floor,Dual Projektor HD; Kerusi Bertingkat (Auditorium); Sistem Audio Dewan; Pendingin Hawa Pusat; Papan Pintar,true,false,Sesuai untuk kuliah gabungan kelas besar dan taklimat program
 BK02,BK02,Bilik Kuliah 02,Bilik Kuliah,35,Bangunan Akademik Utama,1st Floor,Projektor HD; Pendingin Hawa; Papan Putih,true,false,Bilik kuliah standard`;
 
 /**
@@ -245,13 +245,12 @@ export function parseRoomsCSV(csvText: string, currentRooms: Room[] = []): Parse
     const finalCode = rawCode ? rawCode : (existingRoom ? existingRoom.code : code);
     const finalName = rawName ? rawName : (existingRoom ? existingRoom.name : name);
 
-    // Category normalization
+    // Category normalization (Dewan Kuliah diselaraskan di bawah Ruang Khas)
     let category: RoomCategory = existingRoom ? existingRoom.category : 'Bilik Kuliah';
     if (catIdx !== -1 && rawCols[catIdx]?.trim()) {
       const catStr = rawCols[catIdx].toLowerCase().trim();
-      if (catStr.includes('dewan')) category = 'Dewan Kuliah';
+      if (catStr.includes('dewan') || catStr.includes('khas') || catStr.includes('special')) category = 'Ruang Khas';
       else if (catStr.includes('makmal') || catStr.includes('lab')) category = 'Makmal Komputer';
-      else if (catStr.includes('khas') || catStr.includes('special')) category = 'Ruang Khas';
       else if (catStr.includes('surau')) category = 'Surau';
       else category = 'Bilik Kuliah';
     }

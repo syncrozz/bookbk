@@ -26,6 +26,15 @@ export function getStoredRooms(): Room[] {
             }
           }
         }
+
+        // Harmonize: Pastikan Dewan Kuliah (Dewan Besar, Sri Penawar, DKA, DKB) diselaraskan ke 'Ruang Khas'
+        parsed.forEach((r: Room) => {
+          if (r.category === 'Dewan Kuliah') {
+            r.category = 'Ruang Khas';
+            hasChanges = true;
+          }
+        });
+
         if (hasChanges) {
           localStorage.setItem(ROOMS_KEY, JSON.stringify(parsed));
         }

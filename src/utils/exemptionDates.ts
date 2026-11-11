@@ -187,3 +187,36 @@ export function formatRangeMalay(start: string, end: string): string {
   if (!start || !end) return '';
   return `${formatDateMalayShort(start)} hingga ${formatDateMalayShort(end)}`;
 }
+
+/**
+ * Format paparan julat tarikh ringkas dan tajam (contoh: "11–18 Nov 2026" atau "28 Okt – 4 Nov 2026").
+ */
+export function formatCleanDateRange(startStr: string, endStr: string): string {
+  if (!startStr) return '';
+  const months = ['Jan', 'Feb', 'Mac', 'Apr', 'Mei', 'Jun', 'Jul', 'Ogo', 'Sep', 'Okt', 'Nov', 'Dis'];
+  
+  const parseParts = (str: string) => {
+    const parts = str.split('-');
+    return {
+      year: parseInt(parts[0], 10),
+      month: parseInt(parts[1], 10),
+      day: parseInt(parts[2], 10),
+    };
+  };
+
+  const s = parseParts(startStr);
+  if (!endStr || startStr === endStr) {
+    return `${s.day} ${months[s.month - 1]} ${s.year}`;
+  }
+  const e = parseParts(endStr);
+  const sMonth = months[s.month - 1];
+  const eMonth = months[e.month - 1];
+
+  if (s.year === e.year) {
+    if (s.month === e.month) {
+      return `${s.day}–${e.day} ${sMonth} ${s.year}`;
+    }
+    return `${s.day} ${sMonth} – ${e.day} ${eMonth} ${s.year}`;
+  }
+  return `${s.day} ${sMonth} ${s.year} – ${e.day} ${eMonth} ${e.year}`;
+}

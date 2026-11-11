@@ -265,6 +265,7 @@ export default function App() {
     };
   }, []);
 
+
   // Process offline pending bookings queue
   const handleSyncPendingQueue = React.useCallback(async (isAuto: boolean = false) => {
     if (isSyncingQueue) return;
@@ -1407,6 +1408,8 @@ export default function App() {
           </div>
         </div>
       )}
+
+
     </div>
   );
 }

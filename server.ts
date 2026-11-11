@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'url';
 import { serverAuthVault, createStaffFirebaseCustomToken } from './src/server/auth-service';
 
@@ -218,6 +219,11 @@ async function startServer() {
     }
   });
 
+  // Version check disabled upon request
+  app.get('/version.json', (_req, res) => {
+    res.status(200).json({ status: 'ok' });
+  });
+
   // Development: Mount Vite middlewares for SPA HMR & bundle serving
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
@@ -227,9 +233,26 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    // Production: Serve static assets built by Vite
-    app.use(express.static(path.resolve(__dirname, 'dist')));
+    // Production: Immutable caching for hashed assets, strict no-cache for entrypoint/SW
+    app.use('/assets', express.static(path.resolve(__dirname, 'dist/assets'), {
+      maxAge: '1y',
+      immutable: true,
+    }));
+
+    app.use(express.static(path.resolve(__dirname, 'dist'), {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('index.html') || filePath.endsWith('version.json') || filePath.endsWith('sw.js')) {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+        }
+      },
+    }));
+
     app.get('*', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
     });
   }

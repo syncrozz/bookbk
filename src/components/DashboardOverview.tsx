@@ -8,26 +8,59 @@ import {
   PurposeCategory,
   AcademicExemption
 } from '../types';
-import { formatDateMalay } from '../utils/availabilityEngine';
 import { ActiveTab } from './Header';
 import { 
   CalendarDays, 
-  BookOpen, 
-  QrCode, 
-  SlidersHorizontal, 
   Building2, 
-  CheckCircle2, 
-  Clock, 
-  ShieldCheck, 
   ArrowRight, 
-  Sparkles, 
-  Calendar, 
-  Layers, 
-  MapPin, 
-  Laptop, 
-  GraduationCap, 
   Lock 
 } from 'lucide-react';
+
+function formatCleanDateRange(startStr: string, endStr: string): string {
+  if (!startStr) return '';
+  const months = ['Jan', 'Feb', 'Mac', 'Apr', 'Mei', 'Jun', 'Jul', 'Ogo', 'Sep', 'Okt', 'Nov', 'Dis'];
+  
+  const parseParts = (str: string) => {
+    const parts = str.split('-');
+    return {
+      year: parseInt(parts[0], 10),
+      month: parseInt(parts[1], 10),
+      day: parseInt(parts[2], 10),
+    };
+  };
+
+  const s = parseParts(startStr);
+  if (!endStr || startStr === endStr) {
+    return `${s.day} ${months[s.month - 1]} ${s.year}`;
+  }
+  const e = parseParts(endStr);
+  const sMonth = months[s.month - 1];
+  const eMonth = months[e.month - 1];
+
+  if (s.year === e.year) {
+    if (s.month === e.month) {
+      return `${s.day}–${e.day} ${sMonth} ${s.year}`;
+    }
+    return `${s.day} ${sMonth} – ${e.day} ${eMonth} ${s.year}`;
+  }
+  return `${s.day} ${sMonth} ${s.year} – ${e.day} ${eMonth} ${e.year}`;
+}
+
+function formatTime12(t: string): string {
+  if (!t) return '';
+  const [hStr, mStr] = t.split(':');
+  let h = parseInt(hStr, 10);
+  const m = mStr || '00';
+  if (h === 24 || h === 0) {
+    return `12:${m} AM`;
+  }
+  if (h === 12) {
+    return `12:${m} PM`;
+  }
+  const ampm = h > 12 ? 'PM' : 'AM';
+  const displayH = h > 12 ? h - 12 : h;
+  return `${displayH}:${m} ${ampm}`;
+}
 
 interface DashboardOverviewProps {
   rooms: Room[];
@@ -37,7 +70,7 @@ interface DashboardOverviewProps {
   staffList: StaffUser[];
   exemptions?: AcademicExemption[];
   onNavigateTab: (tab: ActiveTab) => void;
-  onOpenBookingModal: (room: Room, date: string, startTime: string, endTime: string, purpose: PurposeCategory) => void;
+  onOpenBookingModal?: (room: Room, date: string, startTime: string, endTime: string, purpose: PurposeCategory) => void;
 }
 
 export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
@@ -48,22 +81,12 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   staffList,
   exemptions = [],
   onNavigateTab,
-  onOpenBookingModal,
+  onOpenBookingModal: _onOpenBookingModal,
 }) => {
-  const todayStr = new Date().toISOString().split('T')[0];
-  
   // Real Database Stats (No mock or hardcoded numbers)
   const totalRooms = rooms.length;
   const confirmedBookings = adhocBookings.filter(b => b.status === 'CONFIRMED');
-  const pendingBookings = adhocBookings.filter(b => b.status === 'PENDING');
-  const todayBookings = adhocBookings.filter(b => b.date === todayStr && b.status === 'CONFIRMED');
   const totalStaff = staffList.length;
-  
-  // Room category distribution dynamically from database
-  const lectureRoomsCount = rooms.filter(r => r.category === 'Bilik Kuliah').length;
-  const labsCount = rooms.filter(r => r.category === 'Makmal Komputer').length;
-  const hallsCount = rooms.filter(r => r.category === 'Dewan Kuliah').length;
-  const specialCount = rooms.filter(r => r.category === 'Ruang Khas' || r.category === 'Surau').length;
 
   return (
     <div className="space-y-4 animate-in fade-in duration-200">
@@ -110,7 +133,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         </div>
       </div>
 
-      {/* STUDY WEEK EXEMPTION CARD */}
+      {/* STUDY WEEK EXEMPTION CARD — MINIMAL STATUS CARD (SIMPLE & SHARP) */}
       {(() => {
         if (!exemptions || exemptions.length === 0) return null;
         const now = new Date();
@@ -118,33 +141,31 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         
         const active = exemptions.find(ex => ex.active && today >= ex.startDate && today <= ex.endDate);
         if (active) {
+          const dateRange = formatCleanDateRange(active.startDate, active.endDate);
           return (
-            <div className="bg-gradient-to-r from-emerald-950 via-teal-900 to-slate-900 text-white rounded-xl p-4 border border-emerald-600 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
-              <div className="flex items-start sm:items-center gap-3">
-                <div className="p-2.5 bg-emerald-600 rounded-lg text-white shrink-0 mt-0.5 sm:mt-0 shadow-sm text-lg font-bold">
+            <div className="bg-gradient-to-r from-emerald-950/90 via-slate-900 to-slate-900 text-white rounded-xl px-3.5 py-2.5 sm:px-4 sm:py-3 border border-emerald-500/50 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4 animate-in fade-in">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 flex items-center justify-center shrink-0 text-sm shadow-xs">
                   📚
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded bg-emerald-500/30 text-emerald-200 border border-emerald-400/30 text-[10px] font-extrabold uppercase tracking-wide">
-                      Study Week
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-white text-[10px] font-extrabold uppercase tracking-wide shadow-xs">
+                      SEDANG BERKUATKUASA
                     </span>
-                    <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-500 text-white">
-                      Sedang Berkuatkuasa
-                    </span>
+                    <h3 className="text-xs sm:text-sm font-extrabold text-white tracking-tight truncate">
+                      Study Week | {dateRange}
+                    </h3>
                   </div>
-                  <h3 className="text-sm font-bold text-white mt-1">
-                    {active.title}: {formatDateMalay(active.startDate)} hingga {formatDateMalay(active.endDate)}
-                  </h3>
-                  <p className="text-xs text-emerald-200/90 mt-0.5">
-                    Jadual hakiki tidak menghalang tempahan. Pensyarah bebas membuat tempahan adhoc pada tempoh ini.
+                  <p className="text-[11px] sm:text-xs text-emerald-200/90 mt-0.5 truncate">
+                    Tempahan adhoc dibenarkan sepanjang tempoh ini.
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
                 <button
                   onClick={() => onNavigateTab('matrix')}
-                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
                 >
                   <span>Semak Matriks</span>
                   <ArrowRight className="w-3.5 h-3.5" />
@@ -162,35 +183,33 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           const nextEx = upcomingList[0];
           const diffDays = Math.round((new Date(nextEx.startDate).getTime() - new Date(today).getTime()) / (1000 * 60 * 60 * 24));
           if (diffDays <= 14) {
+            const dateRange = formatCleanDateRange(nextEx.startDate, nextEx.endDate);
             return (
-              <div className="bg-gradient-to-r from-emerald-950/70 via-teal-950/70 to-slate-900 text-white rounded-xl p-4 border border-emerald-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
-                <div className="flex items-start sm:items-center gap-3">
-                  <div className="p-2.5 bg-emerald-700/60 rounded-lg text-white shrink-0 mt-0.5 sm:mt-0 shadow-sm text-lg font-bold">
+              <div className="bg-gradient-to-r from-emerald-950/80 via-slate-900 to-slate-900 text-white rounded-xl px-3.5 py-2.5 sm:px-4 sm:py-3 border border-emerald-600/40 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4 animate-in fade-in">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-700/30 border border-emerald-600/40 text-emerald-300 flex items-center justify-center shrink-0 text-sm shadow-xs">
                     📚
                   </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-400/20 text-[10px] font-extrabold uppercase tracking-wide">
-                        Study Week
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-600/40 text-emerald-300 border border-emerald-500/40 text-[10px] font-extrabold uppercase tracking-wide">
+                        {diffDays} HARI LAGI
                       </span>
-                      <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-amber-500 text-slate-950">
-                        {diffDays} hari lagi
-                      </span>
+                      <h3 className="text-xs sm:text-sm font-extrabold text-white tracking-tight truncate">
+                        Study Week | {dateRange}
+                      </h3>
                     </div>
-                    <h3 className="text-sm font-bold text-white mt-1">
-                      {nextEx.title}: {formatDateMalay(nextEx.startDate)} hingga {formatDateMalay(nextEx.endDate)}
-                    </h3>
-                    <p className="text-xs text-emerald-200/80 mt-0.5">
-                      Pengecualian jadual hakiki akan bermula tidak lama lagi. Tempahan adhoc akan dibuka sepenuhnya.
+                    <p className="text-[11px] sm:text-xs text-emerald-200/80 mt-0.5 truncate">
+                      Tempahan adhoc dibenarkan sepanjang tempoh ini.
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
                   <button
                     onClick={() => onNavigateTab('matrix')}
-                    className="px-3.5 py-1.5 bg-emerald-700/80 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                    className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-800 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
                   >
-                    <span>Lihat Jadual</span>
+                    <span>Semak Matriks</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
@@ -202,164 +221,73 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         return null;
       })()}
 
-      {/* Official Exam / Institutional Lock Announcement Banner */}
-      {institutionalBlocks.length > 0 && (
-        <div className="bg-gradient-to-r from-rose-950 via-rose-900 to-slate-900 text-white rounded-xl p-4 border border-rose-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-start sm:items-center gap-3">
-            <div className="p-2.5 bg-rose-600 rounded-lg text-white shrink-0 mt-0.5 sm:mt-0 shadow-sm">
-              <Lock className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="px-2 py-0.5 rounded bg-rose-500/30 text-rose-200 border border-rose-400/30 text-[10px] font-extrabold uppercase tracking-wide">
-                  Peperiksaan Akhir Kolej
-                </span>
-                <span className="text-xs text-rose-300 font-medium">
-                  {institutionalBlocks.length} ruang dikunci
-                </span>
+      {/* PEPERIKSAAN AKHIR CARD — MINIMAL STATUS CARD (SIMPLE & SHARP) */}
+      {institutionalBlocks.length > 0 && (() => {
+        const examBlocks = institutionalBlocks.filter(b => b.category === 'EXAM' || b.title?.toLowerCase().includes('peperiksaan') || b.reason?.toLowerCase().includes('peperiksaan'));
+        const activeBlocks = examBlocks.length > 0 ? examBlocks : institutionalBlocks;
+        const uniqueLockedRoomIds = Array.from(new Set(activeBlocks.map(b => b.roomId)));
+        const lockedRoomsCount = uniqueLockedRoomIds.length || activeBlocks.length;
+
+        const dates = activeBlocks.map(b => b.date).filter(Boolean).sort();
+        const endDates = activeBlocks.map(b => b.endDate || b.date).filter(Boolean).sort().reverse();
+        const startDate = dates[0] || '2026-11-02';
+        const endDate = endDates[0] || '2026-11-16';
+
+        const startTimes = activeBlocks.map(b => b.startTime).filter(Boolean).sort();
+        const endTimes = activeBlocks.map(b => b.endTime).filter(Boolean).sort().reverse();
+        const startTime = startTimes[0] || '08:00';
+        const endTime = endTimes[0] || '12:00';
+
+        const dateRangeStr = formatCleanDateRange(startDate, endDate);
+        const timeRangeStr = `${formatTime12(startTime)} – ${formatTime12(endTime)}`;
+
+        return (
+          <div className="bg-gradient-to-r from-rose-950/90 via-slate-900 to-slate-900 text-white rounded-xl px-3.5 py-2.5 sm:px-4 sm:py-3 border border-rose-500/50 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4 animate-in fade-in">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-8 h-8 rounded-lg bg-rose-600/30 border border-rose-500/40 text-rose-300 flex items-center justify-center shrink-0 shadow-xs">
+                <Lock className="w-4 h-4 text-rose-400" />
               </div>
-              <h3 className="text-sm font-bold text-white mt-0.5">
-                Peperiksaan Akhir: 2 Nov – 16 Nov 2026 (08:00 AM – 12:00 AM)
-              </h3>
-              <p className="text-xs text-rose-200/90 mt-0.5">
-                Dewan Besar, Sri Penawar, Dewan Seminar &amp; Mini Seminar ditutup untuk tempahan biasa.
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={() => onNavigateTab('matrix')}
-              className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
-            >
-              <span>Semak di Jadual</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => onNavigateTab('admin')}
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold transition cursor-pointer"
-            >
-              Urus Sekatan
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 2. Compact 2-Column Split: Ruang Ringkas & Tempahan Pantas Hari Ini */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        
-        {/* Left Column (5 cols): Kategori & Statistik Ruang */}
-        <div className="lg:col-span-5 bg-white rounded-xl p-4 border border-slate-200 shadow-xs space-y-3">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-            <div className="flex items-center gap-2">
-              <Building2 className="w-4 h-4 text-blue-600" />
-              <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider">Kategori Ruang</h2>
-            </div>
-            <button
-              onClick={() => onNavigateTab('directory')}
-              className="text-[11px] font-bold text-blue-600 hover:text-blue-700"
-            >
-              Direktori Penuh →
-            </button>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <GraduationCap className="w-3.5 h-3.5 text-blue-600" />
-                <span className="font-medium text-slate-700">Bilik Kuliah</span>
-              </div>
-              <span className="font-bold text-slate-900">{lectureRoomsCount} unit</span>
-            </div>
-
-            <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Laptop className="w-3.5 h-3.5 text-emerald-600" />
-                <span className="font-medium text-slate-700">Makmal Komputer</span>
-              </div>
-              <span className="font-bold text-slate-900">{labsCount} unit</span>
-            </div>
-
-            <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Layers className="w-3.5 h-3.5 text-purple-600" />
-                <span className="font-medium text-slate-700">Dewan Kuliah</span>
-              </div>
-              <span className="font-bold text-slate-900">{hallsCount} unit</span>
-            </div>
-
-            <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                <span className="font-medium text-slate-700">Ruang Khas &amp; Surau</span>
-              </div>
-              <span className="font-bold text-slate-900">{specialCount} unit</span>
-            </div>
-          </div>
-
-          {/* Quick Notice */}
-          <div className="p-2.5 rounded-lg bg-blue-50/70 border border-blue-100 flex items-start gap-2 text-[11px] text-blue-800">
-            <CheckCircle2 className="w-3.5 h-3.5 text-blue-600 mt-0.5 shrink-0" />
-            <span>Sistem mengesan pertembungan jadual kuliah rasmi &amp; tempahan secara automatik.</span>
-          </div>
-        </div>
-
-        {/* Right Column (7 cols): Tempahan Segera Ruang Utama */}
-        <div className="lg:col-span-7 bg-white rounded-xl p-4 border border-slate-200 shadow-xs space-y-3">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-emerald-600" />
-              <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider">Tempahan Pantas ({todayStr})</h2>
-            </div>
-            <button
-              onClick={() => onNavigateTab('matrix')}
-              className="text-[11px] font-bold text-emerald-600 hover:text-emerald-700 cursor-pointer"
-            >
-              Lihat Kalendar Ruang →
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {rooms.slice(0, 4).map((r) => (
-              <div
-                key={r.id}
-                className="p-2.5 rounded-lg border border-slate-200 hover:border-blue-400 bg-slate-50/60 hover:bg-blue-50/40 transition flex items-center justify-between"
-              >
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-bold text-slate-900">{r.name}</span>
-                    {r.name !== r.code && (
-                      <span className="text-[9px] px-1 py-0.2 rounded bg-slate-200 font-semibold text-slate-700">
-                        {r.code}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[10px] text-slate-500">
-                    {r.block} • {r.capacity} pax
-                  </div>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="px-2 py-0.5 rounded-full bg-rose-500/30 text-rose-200 border border-rose-400/40 text-[10px] font-extrabold uppercase tracking-wide">
+                    PEPERIKSAAN AKHIR KOLEJ
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded bg-rose-950/80 text-rose-300 border border-rose-700/60 text-[10px] font-bold uppercase tracking-wide">
+                    {lockedRoomsCount} RUANG DIKUNCI
+                  </span>
                 </div>
-
-                <button
-                  onClick={() => onOpenBookingModal(r, todayStr, '08:30', '10:30', 'Kelas')}
-                  className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[11px] font-bold transition shadow-2xs"
-                >
-                  Tempah
-                </button>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                  <h3 className="text-xs sm:text-sm font-extrabold text-white tracking-tight">
+                    Peperiksaan Akhir
+                  </h3>
+                  <span className="text-slate-500 hidden sm:inline">·</span>
+                  <span className="text-[11px] sm:text-xs text-rose-200/90 font-medium">
+                    {dateRangeStr} · {timeRangeStr}
+                  </span>
+                </div>
+                <p className="text-[11px] sm:text-xs text-rose-200/80 mt-0.5 truncate">
+                  {lockedRoomsCount} ruang tidak tersedia untuk tempahan biasa.
+                </p>
               </div>
-            ))}
+            </div>
+            <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+              <button
+                onClick={() => onNavigateTab('matrix')}
+                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+              >
+                <span>Semak Jadual</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => onNavigateTab('admin')}
+                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold transition cursor-pointer"
+              >
+                Urus Sekatan
+              </button>
+            </div>
           </div>
-
-          <div className="flex items-center justify-between pt-1 text-[11px] text-slate-500">
-            <span>Perlu semakan ketersediaan visual?</span>
-            <button
-              onClick={() => onNavigateTab('matrix')}
-              className="font-bold text-blue-600 hover:underline"
-            >
-              Buka Matriks Kalendar →
-            </button>
-          </div>
-        </div>
-
-      </div>
+        );
+      })()}
 
       {/* 4. Real Operational Booking Records & Empty State */}
       <div className="bg-white rounded-xl p-4 sm:p-5 border border-slate-200 shadow-xs space-y-3">

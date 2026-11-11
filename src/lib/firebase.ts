@@ -1892,59 +1892,6 @@ export async function getDirectFirestoreRoomsCount(): Promise<{ count: number; i
 }
 
 const METADATA_COLLECTION = 'metadata';
-const APP_VERSION_DOC_ID = 'appVersion';
-
-/**
- * Berlangganan dokumen metadata/appVersion secara real-time untuk menerima kemas kini versi platform.
- * Pulangkan fungsi unsubscribe.
- */
-export function subscribeToAppVersion(onUpdate: (label: string | null) => void): () => void {
-  try {
-    const docRef = doc(db, METADATA_COLLECTION, APP_VERSION_DOC_ID);
-    const unsubscribe = onSnapshot(
-      docRef,
-      (snapshot) => {
-        if (snapshot.exists()) {
-          const data = snapshot.data();
-          const label = typeof data?.label === 'string' ? data.label.trim() : null;
-          onUpdate(label);
-        } else {
-          onUpdate(null);
-        }
-      },
-      (error) => {
-        console.warn('subscribeToAppVersion fallback to local:', error);
-        onUpdate(null);
-      }
-    );
-    return unsubscribe;
-  } catch (err) {
-    console.warn('subscribeToAppVersion setup error:', err);
-    onUpdate(null);
-    return () => {};
-  }
-}
-
-/**
- * Menyimpan nilai versi platform ke dokumen metadata/appVersion di Firestore (khusus admin).
- */
-export async function saveAppVersionToCloud(label: string): Promise<void> {
-  const cleanLabel = label.trim();
-  const docRef = doc(db, METADATA_COLLECTION, APP_VERSION_DOC_ID);
-  try {
-    await setDoc(docRef, {
-      label: cleanLabel,
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
-  } catch (err: any) {
-    console.error('saveAppVersionToCloud failed:', err);
-    const code = err?.code || '';
-    if (code === 'permission-denied') {
-      throw new Error('Akses ditolak: Hanya Pentadbir (Admin) yang disahkan boleh menyunting versi.');
-    }
-    throw new Error(err?.message || 'Gagal menyimpan versi ke Cloud Firestore.');
-  }
-}
 
 export const ACADEMIC_EXEMPTIONS_DOC_ID = 'academicExemptions';
 

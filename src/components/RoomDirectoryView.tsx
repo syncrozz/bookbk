@@ -41,7 +41,13 @@ export const RoomDirectoryView: React.FC<RoomDirectoryViewProps> = ({
   }, [selectedRoomModal]);
 
   const filteredRooms = rooms.filter(r => {
-    if (categoryFilter !== 'Semua' && r.category !== categoryFilter) return false;
+    if (categoryFilter !== 'Semua') {
+      if (categoryFilter === 'Ruang Khas') {
+        if (r.category !== 'Ruang Khas' && r.category !== 'Dewan Kuliah') return false;
+      } else if (r.category !== categoryFilter) {
+        return false;
+      }
+    }
     if (searchQuery.trim() !== '') {
       const q = searchQuery.toLowerCase();
       return (
@@ -81,10 +87,9 @@ export const RoomDirectoryView: React.FC<RoomDirectoryViewProps> = ({
             >
               <option value="Semua">Kategori: Semua ({rooms.length} Ruang)</option>
               <option value="Bilik Kuliah">🏫 Bilik Kuliah (BK01 – BK28, Smart Classroom)</option>
-              <option value="Ruang Khas">🎓 Ruang Khas (Aras 1 Perpustakaan, Bilik Kota Tinggi, Dewan Seminar, Mini Seminar, Bilik Inkubator)</option>
+              <option value="Ruang Khas">🎓 Ruang Khas &amp; Dewan Kuliah (Dewan Besar, DKA, DKB, Bilik Seminar, dsb.)</option>
               <option value="Makmal Komputer">💻 Makmal Komputer (Alfa, Beta, Sigma, Gamma, Delta)</option>
-              <option value="Dewan Kuliah">🏛️ Dewan Utama & Dewan Kuliah (Dewan Besar, DKA, DKB)</option>
-              <option value="Surau">🕌 Surau (Surau 1 & Surau 2)</option>
+              <option value="Surau">🕌 Surau (Surau 1 &amp; Surau 2)</option>
             </select>
           </div>
 

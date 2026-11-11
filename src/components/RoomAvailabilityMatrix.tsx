@@ -18,6 +18,7 @@ import {
   getExemptionForDate,
   isTimeOverlap
 } from '../utils/availabilityEngine';
+import { formatCleanDateRange } from '../utils/exemptionDates';
 import {
   ALL_BOOKING_TIME_SLOTS,
   DAY_TIME_SLOTS,
@@ -290,11 +291,11 @@ export const RoomAvailabilityMatrix: React.FC<RoomAvailabilityMatrixProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedCellInfo]);
 
-  // Keutamaan susunan kategori Matrix paparan: 1. Bilik Kuliah, 2. Ruang Khas, 3. Makmal Komputer
+  // Keutamaan susunan kategori Matrix paparan: 1. Bilik Kuliah, 2. Ruang Khas & Dewan, 3. Makmal Komputer
   const CATEGORY_ORDER: Record<string, number> = {
     'Bilik Kuliah': 1,
-    'Dewan Kuliah': 1,
     'Ruang Khas': 2,
+    'Dewan Kuliah': 2,
     'Surau': 2,
     'Makmal Komputer': 3,
   };
@@ -303,8 +304,8 @@ export const RoomAvailabilityMatrix: React.FC<RoomAvailabilityMatrixProps> = ({
   const filteredRooms = rooms
     .filter(r => {
       if (categoryFilter !== 'Semua') {
-        if (categoryFilter === 'Bilik Kuliah' && r.category !== 'Bilik Kuliah' && r.category !== 'Dewan Kuliah') return false;
-        if (categoryFilter === 'Ruang Khas' && r.category !== 'Ruang Khas' && r.category !== 'Surau') return false;
+        if (categoryFilter === 'Bilik Kuliah' && r.category !== 'Bilik Kuliah') return false;
+        if (categoryFilter === 'Ruang Khas' && r.category !== 'Ruang Khas' && r.category !== 'Dewan Kuliah' && r.category !== 'Surau') return false;
         if (categoryFilter === 'Makmal Komputer' && r.category !== 'Makmal Komputer') return false;
       }
       if (searchQuery.trim() !== '') {
@@ -450,24 +451,26 @@ export const RoomAvailabilityMatrix: React.FC<RoomAvailabilityMatrixProps> = ({
         const activeEx = getExemptionForDate(selectedDate, exemptions);
         if (!activeEx) return null;
         return (
-          <div className="bg-emerald-600 text-white rounded-2xl p-4 shadow-md border border-emerald-500 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
-            <div className="flex items-start sm:items-center gap-3">
-              <div className="p-2 bg-emerald-700/80 rounded-xl shrink-0">
-                <span className="text-xl">📚</span>
+          <div className="bg-emerald-600 text-white rounded-xl px-3.5 py-2.5 sm:px-4 sm:py-3 shadow-xs border border-emerald-500 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-8 h-8 rounded-lg bg-emerald-700/80 border border-emerald-400/40 text-emerald-100 flex items-center justify-center shrink-0 text-sm shadow-xs font-bold">
+                📚
               </div>
-              <div>
-                <div className="font-extrabold text-sm sm:text-base flex flex-wrap items-center gap-2">
-                  <span>{activeEx.title}</span>
-                  <span className="text-[10px] bg-emerald-800 text-emerald-100 px-2 py-0.5 rounded-full font-bold border border-emerald-400/40 uppercase tracking-wide">
-                    Sedang Berkuatkuasa
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-700 text-white text-[10px] font-extrabold uppercase tracking-wide border border-emerald-400/40 shadow-xs">
+                    SEDANG BERKUATKUASA
                   </span>
+                  <h3 className="text-xs sm:text-sm font-extrabold text-white tracking-tight truncate">
+                    Study Week | {formatCleanDateRange(activeEx.startDate, activeEx.endDate)}
+                  </h3>
                 </div>
-                <p className="text-xs text-emerald-100 mt-0.5">
-                  Tiada jadual aktif. Tempahan adhoc dibenarkan.
+                <p className="text-[11px] sm:text-xs text-emerald-100/90 mt-0.5 truncate">
+                  Jadual tidak aktif. Tempahan adhoc dibenarkan.
                 </p>
               </div>
             </div>
-            <div className="text-xs text-emerald-100 bg-emerald-700/60 px-3 py-1.5 rounded-xl border border-emerald-500/50 self-start sm:self-auto font-medium">
+            <div className="text-[11px] text-emerald-100 bg-emerald-700/60 px-2.5 py-1 rounded-lg border border-emerald-400/30 self-start sm:self-auto font-medium shrink-0">
               Skop: {activeEx.scope === 'ALL_ROOMS' ? 'Semua Ruang' : activeEx.scope === 'BILIK_KULIAH' ? 'Bilik Kuliah Sahaja' : 'Ruang Terpilih'}
             </div>
           </div>
