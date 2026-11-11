@@ -6,7 +6,6 @@ import { getStoredActiveUser, clearActiveUser, subscribeToActiveUser } from '../
 import { APP_VERSION_LABEL } from '../config/version';
 import { subscribeToAppVersion, saveAppVersionToCloud } from '../lib/firebase';
 import { 
-  Menu,
   X,
   User,
   ChevronDown,
@@ -14,7 +13,9 @@ import {
   LogOut,
   Pencil,
   Check,
-  Loader2
+  Loader2,
+  Lock,
+  UserCheck
 } from 'lucide-react';
 
 export type ActiveTab = 'dashboard' | 'matrix' | 'academic' | 'mybookings' | 'directory' | 'admin';
@@ -38,8 +39,7 @@ export const Header: React.FC<HeaderProps> = ({
   onLogoutAdmin,
   onRequirePinChange
 }) => {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [showCloudSyncModal, setShowCloudSyncModal] = useState(false);
   const [currentUser, setCurrentUser] = useState(() => getStoredActiveUser());
 
@@ -142,13 +142,12 @@ export const Header: React.FC<HeaderProps> = ({
     return () => {
       unsubscribe();
     };
-  }, [userMenuOpen]);
+  }, [isLoginModalOpen]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setMobileMenuOpen(false);
-        setUserMenuOpen(false);
+        setIsLoginModalOpen(false);
         setShowCloudSyncModal(false);
       }
     };
@@ -158,8 +157,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   const handleTabClick = (tab: ActiveTab) => {
     setActiveTab(tab);
-    setMobileMenuOpen(false);
-    setUserMenuOpen(false);
+    setIsLoginModalOpen(false);
   };
 
   return (
@@ -315,112 +313,117 @@ export const Header: React.FC<HeaderProps> = ({
                 onClick={() => {
                   clearActiveUser();
                   setCurrentUser(null);
-                  setUserMenuOpen(false);
+                  setIsLoginModalOpen(false);
                 }}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white rounded-lg text-xs font-bold shadow-md shadow-orange-950/40 transition cursor-pointer"
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white rounded-xl text-xs font-bold shadow-md shadow-orange-950/40 transition cursor-pointer"
                 title={`Log keluar daripada ${currentUser.applicantName} (kembali ke default view)`}
               >
                 <LogOut className="w-3.5 h-3.5" />
-                <span>Log Keluar</span>
+                <span className="hidden xs:inline">Log Keluar</span>
               </button>
             )}
 
-            {/* Profile Dropdown Toggle */}
-            <div className="relative hidden sm:block">
-              <button
-                type="button"
-                onClick={() => setUserMenuOpen(!userMenuOpen)}
-                className={`group px-3 py-1.5 rounded-xl border flex items-center gap-2 text-xs font-semibold transition-all duration-150 cursor-pointer shadow-md ${
-                  currentUser
-                    ? 'bg-gradient-to-r from-blue-900/80 via-indigo-900/70 to-slate-900 border-blue-500/50 hover:border-blue-400 text-white shadow-blue-950/40 ring-1 ring-blue-500/30 hover:ring-blue-400/60'
-                    : 'bg-gradient-to-r from-slate-800 via-slate-800 to-blue-950/80 hover:from-slate-700 hover:to-blue-900 text-slate-100 border-blue-500/40 hover:border-blue-400 shadow-slate-950/40 ring-1 ring-blue-500/20 hover:ring-blue-400/50'
-                } ${userMenuOpen ? 'ring-2 ring-blue-400 border-blue-400' : ''}`}
-                title={currentUser ? `Akaun Staf: ${currentUser.applicantName}` : "Tetapan & Log Masuk Akaun Staf"}
-              >
-                <div className="relative flex items-center justify-center">
-                  <div className={`w-6 h-6 rounded-lg flex items-center justify-center border transition-colors ${
-                    currentUser 
-                      ? 'bg-blue-600 text-white border-blue-400 shadow-xs' 
-                      : 'bg-blue-500/20 text-blue-300 border-blue-400/40 group-hover:bg-blue-500/30'
-                  }`}>
-                    <User className="w-3.5 h-3.5" />
-                  </div>
-                  {currentUser && (
-                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 ring-2 ring-slate-900" />
-                  )}
-                </div>
-
-                <div className="flex flex-col text-left leading-tight">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-blue-300/90">
-                    {currentUser ? 'Staf Aktif' : 'Akaun Staf'}
-                  </span>
-                  <span className="text-xs font-extrabold text-white max-w-[130px] sm:max-w-[150px] truncate">
-                    {currentUser ? currentUser.applicantName : 'Log Masuk'}
-                  </span>
-                </div>
-
-                <ChevronDown className={`w-3.5 h-3.5 text-blue-300/80 transition-transform duration-200 ml-0.5 ${userMenuOpen ? 'rotate-180 text-blue-200' : 'group-hover:translate-y-0.5'}`} />
-              </button>
-
-              {userMenuOpen && (
-                <div className="absolute right-0 mt-2 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-3 z-50 animate-in fade-in zoom-in-95 duration-150">
-                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800">
-                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Akaun Staf Pengguna</span>
-                    <button onClick={() => setUserMenuOpen(false)} className="text-slate-400 hover:text-white">
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                  <LoginUserCard 
-                    staffList={staffList} 
-                    compact={true} 
-                    onProfileChange={() => {
-                      setCurrentUser(getStoredActiveUser());
-                      setUserMenuOpen(false);
-                    }} 
-                    isAdmin={isAdmin}
-                    onRequirePinChange={onRequirePinChange}
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* Mobile Nav Hamburger Menu Button */}
+            {/* Profile / Floating Login Modal Trigger Button (Responsive for Desktop & Mobile) */}
             <button
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="md:hidden p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white border border-slate-700"
-              aria-label="Buka Menu Navigasi"
+              type="button"
+              onClick={() => setIsLoginModalOpen(true)}
+              className={`group px-2.5 sm:px-3 py-1.5 rounded-xl border flex items-center gap-1.5 sm:gap-2 text-xs font-semibold transition-all duration-150 cursor-pointer shadow-md ${
+                currentUser
+                  ? 'bg-gradient-to-r from-blue-900/80 via-indigo-900/70 to-slate-900 border-blue-500/50 hover:border-blue-400 text-white shadow-blue-950/40 ring-1 ring-blue-500/30 hover:ring-blue-400/60'
+                  : 'bg-gradient-to-r from-slate-800 via-slate-800 to-blue-950/80 hover:from-slate-700 hover:to-blue-900 text-slate-100 border-blue-500/40 hover:border-blue-400 shadow-slate-950/40 ring-1 ring-blue-500/20 hover:ring-blue-400/50'
+              } ${isLoginModalOpen ? 'ring-2 ring-blue-400 border-blue-400' : ''}`}
+              title={currentUser ? `Akaun Staf: ${currentUser.applicantName}` : "Log Masuk Akaun Staf"}
             >
-              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              <div className="relative flex items-center justify-center">
+                <div className={`w-6 h-6 rounded-lg flex items-center justify-center border transition-colors ${
+                  currentUser 
+                    ? 'bg-blue-600 text-white border-blue-400 shadow-xs' 
+                    : 'bg-blue-500/20 text-blue-300 border-blue-400/40 group-hover:bg-blue-500/30'
+                }`}>
+                  <User className="w-3.5 h-3.5" />
+                </div>
+                {currentUser && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 ring-2 ring-slate-900" />
+                )}
+              </div>
+
+              <div className="flex flex-col text-left leading-tight">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-blue-300/90 hidden xs:inline-block">
+                  {currentUser ? 'Staf Aktif' : 'Akaun Staf'}
+                </span>
+                <span className="text-xs font-extrabold text-white max-w-[105px] sm:max-w-[150px] truncate">
+                  {currentUser ? currentUser.applicantName : 'Log Masuk'}
+                </span>
+              </div>
+
+              <ChevronDown className={`w-3.5 h-3.5 text-blue-300/80 transition-transform duration-200 ml-0.5 ${isLoginModalOpen ? 'rotate-180 text-blue-200' : 'group-hover:translate-y-0.5'}`} />
             </button>
           </div>
 
         </div>
       </div>
 
-      {/* Mobile Drawer / Staff Account */}
-      {mobileMenuOpen && (
-        <div className="md:hidden border-t border-slate-800 bg-slate-900 px-4 py-4 space-y-3 animate-in slide-in-from-top duration-200">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Akaun Staf Pengguna</span>
-            <button 
-              onClick={() => setMobileMenuOpen(false)} 
-              className="text-slate-400 hover:text-white p-1"
-              aria-label="Tutup menu akaun"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          <div>
-            <LoginUserCard 
-              staffList={staffList} 
-              compact={true} 
-              onProfileChange={() => {
-                setCurrentUser(getStoredActiveUser());
-                setMobileMenuOpen(false);
-              }} 
-              isAdmin={isAdmin}
-              onRequirePinChange={onRequirePinChange}
-            />
+      {/* Floating Login Modal (Centered in Screen with Backdrop Overlay - No Layout Shift) */}
+      {isLoginModalOpen && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="floating-login-modal-title"
+        >
+          {/* Backdrop Dismiss Area */}
+          <div 
+            className="fixed inset-0"
+            onClick={() => setIsLoginModalOpen(false)}
+            aria-hidden="true"
+          />
+
+          {/* Centered Modal Card with Blue Border and Dark Navy Theme */}
+          <div 
+            className="relative w-full max-w-sm bg-slate-900 border border-blue-500/40 rounded-2xl shadow-2xl shadow-black/80 overflow-hidden z-10 animate-in zoom-in-95 duration-200 ring-1 ring-blue-500/20"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header: Ikon Lock, Tajuk "Login" sahaja, dan Butang Tutup (X) */}
+            <div className="bg-slate-950 px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 shrink-0">
+                  {currentUser ? <UserCheck className="w-4 h-4 text-emerald-400" /> : <Lock className="w-4 h-4 text-blue-400" />}
+                </div>
+                <h3 id="floating-login-modal-title" className="text-base font-extrabold text-white leading-tight">
+                  {currentUser ? 'Akaun Staf' : 'Login'}
+                </h3>
+              </div>
+
+              {/* Single Close Button */}
+              <button 
+                type="button"
+                onClick={() => setIsLoginModalOpen(false)} 
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition cursor-pointer"
+                title="Tutup (Esc)"
+                aria-label="Tutup modal login"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-0">
+              <LoginUserCard 
+                staffList={staffList} 
+                compact={true} 
+                onProfileChange={() => {
+                  setCurrentUser(getStoredActiveUser());
+                  setTimeout(() => {
+                    setIsLoginModalOpen(false);
+                  }, 500);
+                }} 
+                isAdmin={isAdmin}
+                onRequirePinChange={(st) => {
+                  setIsLoginModalOpen(false);
+                  if (onRequirePinChange) onRequirePinChange(st);
+                }}
+              />
+            </div>
           </div>
         </div>
       )}

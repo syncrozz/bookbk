@@ -463,7 +463,7 @@ export const RoomAvailabilityMatrix: React.FC<RoomAvailabilityMatrixProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-emerald-100 mt-0.5">
-                  Jadual hakiki tidak berkuatkuasa pada {formatDateMalay(activeEx.startDate)} hingga {formatDateMalay(activeEx.endDate)}. Tempahan adhoc dibenarkan.
+                  Tiada jadual aktif. Tempahan adhoc dibenarkan.
                 </p>
               </div>
             </div>
