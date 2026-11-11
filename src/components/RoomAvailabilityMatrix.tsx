@@ -451,27 +451,26 @@ export const RoomAvailabilityMatrix: React.FC<RoomAvailabilityMatrixProps> = ({
         const activeEx = getExemptionForDate(selectedDate, exemptions);
         if (!activeEx) return null;
         return (
-          <div className="bg-emerald-600 text-white rounded-xl px-3.5 py-2.5 sm:px-4 sm:py-3 shadow-xs border border-emerald-500 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-8 h-8 rounded-lg bg-emerald-700/80 border border-emerald-400/40 text-emerald-100 flex items-center justify-center shrink-0 text-sm shadow-xs font-bold">
-                📚
-              </div>
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="px-2 py-0.5 rounded-full bg-emerald-700 text-white text-[10px] font-extrabold uppercase tracking-wide border border-emerald-400/40 shadow-xs">
-                    SEDANG BERKUATKUASA
-                  </span>
-                  <h3 className="text-xs sm:text-sm font-extrabold text-white tracking-tight truncate">
-                    Study Week | {formatCleanDateRange(activeEx.startDate, activeEx.endDate)}
-                  </h3>
+          <div className="bg-emerald-600 text-white rounded-xl px-3.5 py-2.5 sm:px-4 sm:py-3 shadow-xs border border-emerald-500 overflow-x-auto scrollbar-thin animate-in fade-in">
+            <div className="flex items-center justify-between gap-3 whitespace-nowrap min-w-max">
+              <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
+                <div className="w-8 h-8 rounded-lg bg-emerald-700/80 border border-emerald-400/40 text-emerald-100 flex items-center justify-center shrink-0 text-sm shadow-xs font-bold">
+                  📚
                 </div>
-                <p className="text-[11px] sm:text-xs text-emerald-100/90 mt-0.5 truncate">
-                  Jadual tidak aktif. Tempahan adhoc dibenarkan.
+                <span className="px-2 py-0.5 rounded-full bg-emerald-700 text-white text-[10px] font-extrabold uppercase tracking-wide border border-emerald-400/40 shadow-xs shrink-0">
+                  AKTIF
+                </span>
+                <h3 className="text-xs sm:text-sm font-extrabold text-white tracking-tight shrink-0">
+                  Study Week | {formatCleanDateRange(activeEx.startDate, activeEx.endDate)}
+                </h3>
+                <span className="text-emerald-300/60 font-bold shrink-0">•</span>
+                <p className="text-[11px] sm:text-xs text-emerald-100/90 font-medium shrink-0">
+                  Slot Available For Booking
                 </p>
               </div>
-            </div>
-            <div className="text-[11px] text-emerald-100 bg-emerald-700/60 px-2.5 py-1 rounded-lg border border-emerald-400/30 self-start sm:self-auto font-medium shrink-0">
-              Skop: {activeEx.scope === 'ALL_ROOMS' ? 'Semua Ruang' : activeEx.scope === 'BILIK_KULIAH' ? 'Bilik Kuliah Sahaja' : 'Ruang Terpilih'}
+              <div className="text-[11px] text-emerald-100 bg-emerald-700/60 px-2.5 py-1 rounded-lg border border-emerald-400/30 font-medium shrink-0">
+                Skop: {activeEx.scope === 'ALL_ROOMS' ? 'Semua Ruang' : activeEx.scope === 'BILIK_KULIAH' ? 'Bilik Kuliah Sahaja' : 'Ruang Terpilih'}
+              </div>
             </div>
           </div>
         );

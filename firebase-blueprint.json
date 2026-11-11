@@ -132,33 +132,30 @@
       }
     }
   },
-  "security": {
-    "rules": [
-      {
-        "collection": "bookings",
-        "read": "true",
-        "write": "true"
-      },
-      {
-        "collection": "rooms",
-        "read": "true",
-        "write": "true"
-      },
-      {
-        "collection": "schedule",
-        "read": "true",
-        "write": "true"
-      },
-      {
-        "collection": "blocks",
-        "read": "true",
-        "write": "true"
-      },
-      {
-        "collection": "staff_users",
-        "read": "true",
-        "write": "true"
-      }
-    ]
+  "firestore": {
+    "/bookings/{bookingId}": {
+      "schema": { "$ref": "#/entities/bookings" },
+      "description": "Ad-hoc room bookings"
+    },
+    "/rooms/{roomId}": {
+      "schema": { "$ref": "#/entities/rooms" },
+      "description": "Room and facility catalog"
+    },
+    "/schedule/{scheduleId}": {
+      "schema": { "$ref": "#/entities/schedule" },
+      "description": "Official weekly academic schedule slots"
+    },
+    "/blocks/{blockId}": {
+      "schema": { "$ref": "#/entities/blocks" },
+      "description": "Institutional event and exam room blocks"
+    },
+    "/staff_users/{staffId}": {
+      "schema": { "$ref": "#/entities/staff_users" },
+      "description": "Public staff operational directory"
+    },
+    "/metadata/{metaId}": {
+      "schema": { "$ref": "#/entities/metadata" },
+      "description": "Platform metadata and academic schedule exemptions"
+    }
   }
 }

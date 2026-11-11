@@ -4201,7 +4201,7 @@ ST003,Pengajian Am,Cik Siti Sarah Binti Razak,Pensyarah,013-5558899,siti.sarah@k
                         ) : isCurrentlyActive ? (
                           <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-extrabold px-2 py-0.5 rounded-full inline-flex items-center gap-1.5 animate-pulse">
                             <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                            Sedang Berkuatkuasa
+                            Aktif
                           </span>
                         ) : isUpcoming ? (
                           <span className="bg-blue-50 text-blue-800 border border-blue-200 text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1">

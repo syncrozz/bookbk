@@ -110,52 +110,48 @@ export const AcademicScheduleView: React.FC<AcademicScheduleViewProps> = ({
     <div className="space-y-6">
       {/* STUDY WEEK NOTICE BANNER - MINIMAL & SHARP */}
       {activeNow && (
-        <div className="bg-emerald-600 text-white px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-xl shadow-xs border border-emerald-500 flex items-center justify-between gap-3 animate-in fade-in">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-emerald-700/80 border border-emerald-400/40 text-emerald-100 flex items-center justify-center shrink-0 text-sm shadow-xs font-bold">
-              📚
-            </div>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="px-2 py-0.5 rounded-full bg-emerald-700 text-white text-[10px] font-extrabold uppercase tracking-wide border border-emerald-400/40 shadow-xs">
-                  SEDANG BERKUATKUASA
-                </span>
-                <h3 className="text-xs sm:text-sm font-extrabold text-white tracking-tight truncate">
-                  Study Week | {formatCleanDateRange(activeNow.startDate, activeNow.endDate)}
-                </h3>
+        <div className="bg-emerald-600 text-white px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-xl shadow-xs border border-emerald-500 overflow-x-auto scrollbar-thin animate-in fade-in">
+          <div className="flex items-center justify-between gap-3 whitespace-nowrap min-w-max">
+            <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
+              <div className="w-8 h-8 rounded-lg bg-emerald-700/80 border border-emerald-400/40 text-emerald-100 flex items-center justify-center shrink-0 text-sm shadow-xs font-bold">
+                📚
               </div>
-              <p className="text-[11px] sm:text-xs text-emerald-100/90 mt-0.5 truncate">
-                Jadual tidak aktif. Tempahan adhoc dibenarkan.
+              <span className="px-2 py-0.5 rounded-full bg-emerald-700 text-white text-[10px] font-extrabold uppercase tracking-wide border border-emerald-400/40 shadow-xs shrink-0">
+                AKTIF
+              </span>
+              <h3 className="text-xs sm:text-sm font-extrabold text-white tracking-tight shrink-0">
+                Study Week | {formatCleanDateRange(activeNow.startDate, activeNow.endDate)}
+              </h3>
+              <span className="text-emerald-300/60 font-bold shrink-0">•</span>
+              <p className="text-[11px] sm:text-xs text-emerald-100/90 font-medium shrink-0">
+                Slot Available For Booking
               </p>
             </div>
+            {activeNow.scope && (
+              <div className="text-[11px] text-emerald-100 bg-emerald-700/60 px-2.5 py-1 rounded-lg border border-emerald-400/30 shrink-0 font-medium">
+                Skop: {activeNow.scope === 'ALL_ROOMS' ? 'Semua Ruang' : activeNow.scope === 'BILIK_KULIAH' ? 'Bilik Kuliah Sahaja' : 'Ruang Terpilih'}
+              </div>
+            )}
           </div>
-          {activeNow.scope && (
-            <div className="hidden sm:inline-flex text-[11px] text-emerald-100 bg-emerald-700/60 px-2.5 py-1 rounded-lg border border-emerald-400/30 shrink-0 font-medium">
-              Skop: {activeNow.scope === 'ALL_ROOMS' ? 'Semua Ruang' : activeNow.scope === 'BILIK_KULIAH' ? 'Bilik Kuliah Sahaja' : 'Ruang Terpilih'}
-            </div>
-          )}
         </div>
       )}
 
       {!activeNow && upcoming && (
-        <div className="bg-emerald-50 border border-emerald-200 text-emerald-950 px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-xl shadow-xs flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-950 px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-xl shadow-xs overflow-x-auto scrollbar-thin">
+          <div className="flex items-center gap-2.5 sm:gap-3 whitespace-nowrap min-w-max">
             <div className="w-8 h-8 rounded-lg bg-emerald-100 border border-emerald-300 text-emerald-800 flex items-center justify-center shrink-0 text-sm shadow-xs font-bold">
               📚
             </div>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-extrabold uppercase tracking-wide border border-emerald-300">
-                  AKAN DATANG
-                </span>
-                <h3 className="text-xs sm:text-sm font-extrabold text-emerald-950 tracking-tight truncate">
-                  Study Week | {formatCleanDateRange(upcoming.startDate, upcoming.endDate)}
-                </h3>
-              </div>
-              <p className="text-[11px] sm:text-xs text-emerald-800/90 mt-0.5 truncate">
-                Jadual tidak aktif bermula {formatCleanDateRange(upcoming.startDate, upcoming.startDate)}. Tempahan adhoc dibenarkan.
-              </p>
-            </div>
+            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-extrabold uppercase tracking-wide border border-emerald-300 shrink-0">
+              AKAN DATANG
+            </span>
+            <h3 className="text-xs sm:text-sm font-extrabold text-emerald-950 tracking-tight shrink-0">
+              Study Week | {formatCleanDateRange(upcoming.startDate, upcoming.endDate)}
+            </h3>
+            <span className="text-emerald-400 font-bold shrink-0">•</span>
+            <p className="text-[11px] sm:text-xs text-emerald-800/90 font-medium shrink-0">
+              Slot Available For Booking
+            </p>
           </div>
         </div>
       )}
