@@ -1891,3 +1891,149 @@ export async function getDirectFirestoreRoomsCount(): Promise<{ count: number; i
   }
 }
 
+const METADATA_COLLECTION = 'metadata';
+const APP_VERSION_DOC_ID = 'appVersion';
+
+/**
+ * Berlangganan dokumen metadata/appVersion secara real-time untuk menerima kemas kini versi platform.
+ * Pulangkan fungsi unsubscribe.
+ */
+export function subscribeToAppVersion(onUpdate: (label: string | null) => void): () => void {
+  try {
+    const docRef = doc(db, METADATA_COLLECTION, APP_VERSION_DOC_ID);
+    const unsubscribe = onSnapshot(
+      docRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          const label = typeof data?.label === 'string' ? data.label.trim() : null;
+          onUpdate(label);
+        } else {
+          onUpdate(null);
+        }
+      },
+      (error) => {
+        console.warn('subscribeToAppVersion fallback to local:', error);
+        onUpdate(null);
+      }
+    );
+    return unsubscribe;
+  } catch (err) {
+    console.warn('subscribeToAppVersion setup error:', err);
+    onUpdate(null);
+    return () => {};
+  }
+}
+
+/**
+ * Menyimpan nilai versi platform ke dokumen metadata/appVersion di Firestore (khusus admin).
+ */
+export async function saveAppVersionToCloud(label: string): Promise<void> {
+  const cleanLabel = label.trim();
+  const docRef = doc(db, METADATA_COLLECTION, APP_VERSION_DOC_ID);
+  try {
+    await setDoc(docRef, {
+      label: cleanLabel,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  } catch (err: any) {
+    console.error('saveAppVersionToCloud failed:', err);
+    const code = err?.code || '';
+    if (code === 'permission-denied') {
+      throw new Error('Akses ditolak: Hanya Pentadbir (Admin) yang disahkan boleh menyunting versi.');
+    }
+    throw new Error(err?.message || 'Gagal menyimpan versi ke Cloud Firestore.');
+  }
+}
+
+export const ACADEMIC_EXEMPTIONS_DOC_ID = 'academicExemptions';
+
+/**
+ * Berlangganan dokumen metadata/academicExemptions secara real-time.
+ * Data disimpan dalam medan 'items' (tatasusunan AcademicExemption).
+ * Fallback lancar ke localStorage sekiranya luar talian atau ralat.
+ */
+export function subscribeToAcademicExemptions(onUpdate: (list: AcademicExemption[]) => void): () => void {
+  try {
+    const docRef = doc(db, METADATA_COLLECTION, ACADEMIC_EXEMPTIONS_DOC_ID);
+    const unsubscribe = onSnapshot(
+      docRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          recordSnapshotSuccess(METADATA_COLLECTION);
+          const data = snapshot.data();
+          const items = Array.isArray(data?.items) ? data.items : [];
+          saveStoredAcademicExemptions(items);
+          onUpdate(items);
+        } else {
+          recordSnapshotSuccess(METADATA_COLLECTION);
+          const local = getStoredAcademicExemptions();
+          onUpdate(local);
+        }
+      },
+      (error) => {
+        reportSnapshotFallbackError(METADATA_COLLECTION, error);
+        console.warn('subscribeToAcademicExemptions fallback to local:', error);
+        onUpdate(getStoredAcademicExemptions());
+      }
+    );
+    return unsubscribe;
+  } catch (err) {
+    reportSnapshotFallbackError(METADATA_COLLECTION, err);
+    console.warn('subscribeToAcademicExemptions setup error:', err);
+    onUpdate(getStoredAcademicExemptions());
+    return () => {};
+  }
+}
+
+/**
+ * Membersihkan objek AcademicExemption agar tiada medan 'undefined' dihantar ke Firestore
+ * (cth: roomIds atau reason yang kosong).
+ */
+export function sanitizeAcademicExemption(item: AcademicExemption): Record<string, any> {
+  const clean: Record<string, any> = {
+    id: item.id,
+    title: item.title,
+    startDate: item.startDate,
+    endDate: item.endDate,
+    scope: item.scope,
+    active: item.active !== false,
+    createdBy: item.createdBy || 'Admin KPMBP',
+    createdAt: item.createdAt || new Date().toISOString(),
+  };
+
+  if (item.scope === 'SELECTED' && Array.isArray(item.roomIds) && item.roomIds.length > 0) {
+    clean.roomIds = item.roomIds;
+  }
+  if (item.reason && item.reason.trim()) {
+    clean.reason = item.reason.trim();
+  }
+  return clean;
+}
+
+/**
+ * Menyimpan senarai pengecualian akademik ke dokumen metadata/academicExemptions di Firestore (khusus admin).
+ */
+export async function saveAcademicExemptionsToCloud(list: AcademicExemption[]): Promise<void> {
+  const docRef = doc(db, METADATA_COLLECTION, ACADEMIC_EXEMPTIONS_DOC_ID);
+  
+  // Sanitasi setiap item bagi menghalang sebarang medan undefined dihantar ke Firestore
+  const sanitizedList = list.map((item) => sanitizeAcademicExemption(item));
+  saveStoredAcademicExemptions(sanitizedList as AcademicExemption[]);
+  try {
+    await setDoc(docRef, {
+      items: sanitizedList,
+      updatedAt: serverTimestamp(),
+      updatedBy: 'admin',
+    }, { merge: true });
+  } catch (err: any) {
+    console.error('saveAcademicExemptionsToCloud failed:', err);
+    const code = err?.code || '';
+    if (code === 'permission-denied') {
+      throw new Error('Akses ditolak: Hanya Pentadbir (Admin) yang disahkan boleh menyunting pengecualian jadual hakiki.');
+    }
+    throw new Error(err?.message || 'Gagal menyimpan pengecualian ke Cloud Firestore (disimpan secara tempatan).');
+  }
+}
+
+
