@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Room, 
   AcademicScheduleSlot, 
@@ -9,6 +9,12 @@ import {
   AcademicExemption
 } from '../types';
 import { ActiveTab } from './Header';
+import { 
+  getCalendarMonthBounds, 
+  getBookingsForMonth,
+  getConfirmedBookingsForMonth,
+  CalendarMonthBounds
+} from '../utils/monthlyBookings';
 import { 
   CalendarDays, 
   Building2, 
@@ -84,48 +90,83 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   onOpenBookingModal: _onOpenBookingModal,
 }) => {
   // Real Database Stats (No mock or hardcoded numbers)
+  const [monthBounds, setMonthBounds] = useState<CalendarMonthBounds>(() => getCalendarMonthBounds(new Date()));
+
+  useEffect(() => {
+    const syncMonth = () => {
+      const next = getCalendarMonthBounds(new Date());
+      setMonthBounds((prev) => (prev.startDate === next.startDate ? prev : next));
+    };
+    const intervalId = window.setInterval(syncMonth, 30000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
   const totalRooms = rooms.length;
-  const confirmedBookings = adhocBookings.filter(b => b.status === 'CONFIRMED');
+  const monthlyBookings = getBookingsForMonth(adhocBookings, monthBounds.startDate);
+  const monthlyConfirmedBookings = getConfirmedBookingsForMonth(adhocBookings, monthBounds.startDate);
   const totalStaff = staffList.length;
 
   return (
     <div className="space-y-4 animate-in fade-in duration-200">
       
       {/* 1. Compact Header Bar with Metrics */}
-      <div className="bg-slate-900 text-white rounded-xl p-4 sm:p-5 border border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+      <div className="bg-slate-900 text-white rounded-xl p-4 sm:p-5 border border-slate-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+        <div className="flex items-center gap-3 min-w-0">
           <div className="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center text-white shrink-0 shadow-sm">
             <Building2 className="w-5 h-5" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-base sm:text-lg font-bold text-white tracking-tight">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <h1 className="text-base sm:text-lg font-bold text-white tracking-tight leading-snug">
                 Pengurusan Ruang KPMBP
               </h1>
-              <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-400/20">
+              <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-400/20 shrink-0">
                 Sesi 2 2026/2027
               </span>
             </div>
           </div>
         </div>
 
-        {/* Dense Key Stats */}
-        <div className="flex items-center gap-2 sm:gap-4 shrink-0 bg-slate-800/80 px-3.5 py-2 rounded-lg border border-slate-700">
-          <div className="text-center px-2 border-r border-slate-700">
-            <div className="text-sm sm:text-base font-bold text-white leading-none">{totalRooms}</div>
-            <div className="text-[10px] text-slate-400 uppercase font-semibold mt-0.5">Ruang</div>
+        {/* Balanced Equal-Width KPI Grid */}
+        <div className="w-full sm:w-auto sm:shrink-0 sm:min-w-[344px] md:min-w-[384px] lg:min-w-[420px] bg-slate-800/75 rounded-lg border border-slate-700/80 grid grid-cols-2 sm:grid-cols-4">
+          {/* KPI 1: RUANG */}
+          <div className="flex flex-col items-center justify-center text-center px-2.5 md:px-3 py-2.5 border-r border-b sm:border-b-0 border-slate-700/70 min-w-0">
+            <div className="text-base sm:text-lg font-bold text-white leading-none tabular-nums">
+              {totalRooms}
+            </div>
+            <div className="text-[10px] text-slate-300 uppercase font-semibold tracking-wider leading-tight mt-1.5 whitespace-nowrap">
+              RUANG
+            </div>
           </div>
-          <div className="text-center px-2 border-r border-slate-700">
-            <div className="text-sm sm:text-base font-bold text-emerald-400 leading-none">{confirmedBookings.length}</div>
-            <div className="text-[10px] text-slate-400 uppercase font-semibold mt-0.5">Disahkan</div>
+
+          {/* KPI 2: TEMPAHAN (BULAN INI) */}
+          <div className="flex flex-col items-center justify-center text-center px-2.5 md:px-3 py-2.5 border-b sm:border-b-0 sm:border-r border-slate-700/70 min-w-0">
+            <div className="text-base sm:text-lg font-bold text-emerald-400 leading-none tabular-nums">
+              {monthlyConfirmedBookings.length}
+            </div>
+            <div className="text-[10px] text-slate-300 uppercase font-semibold tracking-wider leading-tight mt-1.5 whitespace-nowrap">
+              TEMPAHAN
+            </div>
           </div>
-          <div className="text-center px-2 border-r border-slate-700">
-            <div className="text-sm sm:text-base font-bold text-amber-400 leading-none">{academicSchedule.length}</div>
-            <div className="text-[10px] text-slate-400 uppercase font-semibold mt-0.5">Kuliah</div>
+
+          {/* KPI 3: KULIAH */}
+          <div className="flex flex-col items-center justify-center text-center px-2.5 md:px-3 py-2.5 border-r border-slate-700/70 min-w-0">
+            <div className="text-base sm:text-lg font-bold text-amber-400 leading-none tabular-nums">
+              {academicSchedule.length}
+            </div>
+            <div className="text-[10px] text-slate-300 uppercase font-semibold tracking-wider leading-tight mt-1.5 whitespace-nowrap">
+              KULIAH
+            </div>
           </div>
-          <div className="text-center px-2">
-            <div className="text-sm sm:text-base font-bold text-blue-400 leading-none">{totalStaff}</div>
-            <div className="text-[10px] text-slate-400 uppercase font-semibold mt-0.5">Staf Rasmi</div>
+
+          {/* KPI 4: STAF RASMI */}
+          <div className="flex flex-col items-center justify-center text-center px-2.5 md:px-3 py-2.5 min-w-0">
+            <div className="text-base sm:text-lg font-bold text-blue-400 leading-none tabular-nums">
+              {totalStaff}
+            </div>
+            <div className="text-[10px] text-slate-300 uppercase font-semibold tracking-wider leading-tight mt-1.5 whitespace-nowrap">
+              STAF RASMI
+            </div>
           </div>
         </div>
       </div>
@@ -279,13 +320,13 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
             <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider">Aktiviti &amp; Status Tempahan Semasa</h2>
           </div>
           <span className="text-[11px] font-mono font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-            {adhocBookings.length} Rekod
+            {monthlyBookings.length} Rekod
           </span>
         </div>
 
-        {adhocBookings.length > 0 ? (
+        {monthlyBookings.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {adhocBookings.slice(0, 6).map((b) => (
+            {monthlyBookings.slice(0, 6).map((b) => (
               <div key={b.id} className="p-3 rounded-lg border border-slate-200 bg-slate-50 space-y-2 text-xs">
                 <div className="flex items-center justify-between">
                   <span className="font-mono font-bold bg-slate-900 text-emerald-400 px-2 py-0.5 rounded text-[10px]">

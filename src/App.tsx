@@ -43,6 +43,7 @@ import {
 } from './utils/storage';
 import { matchStaffByEmail } from './utils/staff-matcher';
 import { findActiveExemption } from './utils/availabilityEngine';
+import { getCalendarMonthBounds } from './utils/monthlyBookings';
 import { 
   subscribeToBookings, 
   subscribeToBlocks, 
@@ -281,7 +282,8 @@ export default function App() {
       const res = await syncPendingBookingsQueue();
       if (res.syncedCount > 0) {
         // Refresh local bookings state to reflect confirmed status
-        const latestBookings = getStoredAdHocBookings();
+        const monthStart = getCalendarMonthBounds().startDate;
+        const latestBookings = getStoredAdHocBookings().filter((b) => Boolean(b?.date) && b.date >= monthStart);
         setAdhocBookings(latestBookings);
         showToast(`🟢 ${res.syncedCount} tempahan luar talian berjaya DISAHKAN & disinkronkan ke Cloud!`);
       } else if (res.failedCount > 0 && !isAuto) {
@@ -397,7 +399,8 @@ export default function App() {
 
     setRooms(getStoredRooms());
     setAcademicSchedule(getStoredAcademicSchedule());
-    setAdhocBookings(getStoredAdHocBookings());
+    const monthStartCutoff = getCalendarMonthBounds().startDate;
+    setAdhocBookings(getStoredAdHocBookings().filter((b) => Boolean(b?.date) && b.date >= monthStartCutoff));
     setInstitutionalBlocks(getStoredInstitutionalBlocks());
 
     // Clean any obsolete demo records from Cloud Firestore (Strict Zero Demo Data)

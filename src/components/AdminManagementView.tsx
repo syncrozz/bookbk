@@ -38,7 +38,8 @@ import {
   updateStaffPinInCloud, 
   resetStaffPinInCloud, 
   getDirectFirestoreRoomsCount,
-  saveAcademicExemptionsToCloud
+  saveAcademicExemptionsToCloud,
+  fetchAllBookingsHistoryOnce
 } from '../lib/firebase';
 import { getStoredRooms } from '../utils/storage';
 import { ensureBookbkPrefix } from '../utils/downloadHelper';
@@ -512,6 +513,36 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   const [isRestoringBookings, setIsRestoringBookings] = useState<boolean>(false);
   const [bookingRestoreSuccessMsg, setBookingRestoreSuccessMsg] = useState<string | null>(null);
   const [bookingRestoreErrorMsg, setBookingRestoreErrorMsg] = useState<string | null>(null);
+  const [historicalBookings, setHistoricalBookings] = useState<AdHocBooking[] | null>(null);
+  const [isLoadingHistory, setIsLoadingHistory] = useState<boolean>(false);
+
+  const displayedBookings = useMemo(() => {
+    if (!historicalBookings) return bookings;
+    const mergedMap = new Map<string, AdHocBooking>();
+    historicalBookings.forEach((b) => mergedMap.set(b.id, b));
+    bookings.forEach((b) => mergedMap.set(b.id, b));
+    return Array.from(mergedMap.values()).sort(
+      (a, b) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime()
+    );
+  }, [bookings, historicalBookings]);
+
+  const handleToggleHistoricalBookings = async () => {
+    if (historicalBookings !== null) {
+      setHistoricalBookings(null);
+      return;
+    }
+    setIsLoadingHistory(true);
+    setBookingRestoreErrorMsg(null);
+    try {
+      const allHistory = await fetchAllBookingsHistoryOnce();
+      setHistoricalBookings(allHistory);
+      setBookingRestoreSuccessMsg(`Rekod arkib sejarah dimuatkan (${allHistory.length} jumlah rekod termasuk bulan-bulan terdahulu).`);
+    } catch (err: any) {
+      setBookingRestoreErrorMsg(err?.message || 'Gagal memuatkan rekod arkib sejarah dari Cloud.');
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
 
   const handleUploadBookingsCSV = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -951,13 +982,13 @@ ST003,Pengajian Am,Cik Siti Sarah Binti Razak,Pensyarah,013-5558899,siti.sarah@k
 
   // Export Ad-Hoc Bookings to CSV (Full Backup with all 17 fields & UTF-8 BOM)
   const handleExportBookingsCSV = (filterStatus: 'ALL' | 'CONFIRMED' | 'PENDING' = 'ALL') => {
-    let toExport = bookings;
+    let toExport = displayedBookings;
     let label = 'semua';
     if (filterStatus === 'CONFIRMED') {
-      toExport = bookings.filter(b => b.status === 'CONFIRMED');
+      toExport = displayedBookings.filter(b => b.status === 'CONFIRMED');
       label = 'disahkan';
     } else if (filterStatus === 'PENDING') {
-      toExport = bookings.filter(b => b.status === 'PENDING');
+      toExport = displayedBookings.filter(b => b.status === 'PENDING');
       label = 'menunggu';
     }
 
@@ -4403,12 +4434,33 @@ ST003,Pengajian Am,Cik Siti Sarah Binti Razak,Pensyarah,013-5558899,siti.sarah@k
           <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button
               type="button"
+              onClick={handleToggleHistoricalBookings}
+              disabled={isLoadingHistory}
+              className={`font-bold py-2.5 px-3.5 rounded-xl text-xs transition flex items-center gap-1.5 border cursor-pointer shadow-xs active:scale-95 disabled:opacity-50 ${
+                historicalBookings !== null
+                  ? 'bg-slate-900 text-white border-slate-800 hover:bg-slate-800'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
+              }`}
+              title="Muat dan papar rekod tempahan bulan-bulan terdahulu daripada Cloud Firestore"
+            >
+              <Clock className={`w-3.5 h-3.5 ${isLoadingHistory ? 'animate-spin' : ''}`} />
+              <span>
+                {isLoadingHistory
+                  ? 'Memuatkan Arkib...'
+                  : historicalBookings !== null
+                  ? `Arkib Penuh Aktif (${displayedBookings.length})`
+                  : 'Muat Arkib Terdahulu'}
+              </span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => handleExportBookingsCSV('ALL')}
               className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs transition flex items-center gap-2 shadow-md shadow-emerald-600/20 active:scale-95 cursor-pointer"
               title="Muat turun semua rekod tempahan ke fail CSV"
             >
               <Download className="w-4 h-4" />
-              <span>Muat Turun Sandaran Semua ({bookings.length} Rekod)</span>
+              <span>Muat Turun Sandaran Semua ({displayedBookings.length} Rekod)</span>
             </button>
 
             <button
@@ -4418,7 +4470,7 @@ ST003,Pengajian Am,Cik Siti Sarah Binti Razak,Pensyarah,013-5558899,siti.sarah@k
               title="Eksport rekod tempahan yang disahkan sahaja"
             >
               <Check className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Disahkan ({bookings.filter(b => b.status === 'CONFIRMED').length})</span>
+              <span>Disahkan ({displayedBookings.filter(b => b.status === 'CONFIRMED').length})</span>
             </button>
 
             <button
@@ -4491,7 +4543,7 @@ ST003,Pengajian Am,Cik Siti Sarah Binti Razak,Pensyarah,013-5558899,siti.sarah@k
         )}
 
         {/* Empty State vs Table Display */}
-        {bookings.length === 0 ? (
+        {displayedBookings.length === 0 ? (
           <div className="bg-gradient-to-br from-amber-50/70 via-white to-orange-50/60 border border-amber-200/90 rounded-2xl p-5 sm:p-6 space-y-4">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-amber-100 pb-3">
               <div className="flex items-center gap-2.5">
@@ -4609,7 +4661,7 @@ ST003,Pengajian Am,Cik Siti Sarah Binti Razak,Pensyarah,013-5558899,siti.sarah@k
                     bookingStatusFilter === 'ALL' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  Semua ({bookings.length})
+                  Semua ({displayedBookings.length})
                 </button>
                 <button
                   type="button"
@@ -4619,7 +4671,7 @@ ST003,Pengajian Am,Cik Siti Sarah Binti Razak,Pensyarah,013-5558899,siti.sarah@k
                   }`}
                 >
                   <Check className="w-3 h-3 text-emerald-600" />
-                  Disahkan ({bookings.filter(b => b.status === 'CONFIRMED').length})
+                  Disahkan ({displayedBookings.filter(b => b.status === 'CONFIRMED').length})
                 </button>
                 <button
                   type="button"
@@ -4629,7 +4681,7 @@ ST003,Pengajian Am,Cik Siti Sarah Binti Razak,Pensyarah,013-5558899,siti.sarah@k
                   }`}
                 >
                   <Clock className="w-3 h-3 text-amber-600" />
-                  Menunggu ({bookings.filter(b => b.status === 'PENDING').length})
+                  Menunggu ({displayedBookings.filter(b => b.status === 'PENDING').length})
                 </button>
                 <button
                   type="button"
@@ -4639,7 +4691,7 @@ ST003,Pengajian Am,Cik Siti Sarah Binti Razak,Pensyarah,013-5558899,siti.sarah@k
                   }`}
                 >
                   <XCircle className="w-3 h-3 text-rose-600" />
-                  Ditolak ({bookings.filter(b => b.status === 'REJECTED').length})
+                  Ditolak ({displayedBookings.filter(b => b.status === 'REJECTED').length})
                 </button>
               </div>
 
@@ -4670,7 +4722,7 @@ ST003,Pengajian Am,Cik Siti Sarah Binti Razak,Pensyarah,013-5558899,siti.sarah@k
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[11px]">
-                  {bookings
+                  {displayedBookings
                     .filter(b => {
                       if (bookingStatusFilter !== 'ALL' && b.status !== bookingStatusFilter) return false;
                       if (!bookingSearchTerm.trim()) return true;

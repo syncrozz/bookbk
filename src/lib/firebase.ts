@@ -41,6 +41,7 @@ import {
   saveStoredAcademicExemptions
 } from '../utils/storage';
 import { generateBookingIdempotencyKey, isSlotOverlapping } from '../utils/idempotency';
+import { getEffectiveBookingLookbackCutoff } from '../utils/monthlyBookings';
 import { matchStaffByEmail } from '../utils/staff-matcher';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -136,12 +137,7 @@ function fetchOnceWithTtl(
 }
 
 function getBookingCutoffDate(): string {
-  const d = new Date();
-  d.setDate(d.getDate() - BOOKING_LOOKBACK_DAYS);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  return getEffectiveBookingLookbackCutoff(BOOKING_LOOKBACK_DAYS);
 }
 
 /**
@@ -1158,11 +1154,12 @@ export function verifyStaffCredentialsLocally(
  * When any user adds, updates, or cancels a booking, all connected clients receive the update live.
  */
 export function subscribeToBookings(onUpdate: (bookings: AdHocBooking[]) => void): () => void {
+  const cutoffDate = getBookingCutoffDate();
   try {
-    // Hanya tempahan dalam BOOKING_LOOKBACK_DAYS hari lepas dan akan datang (kurangkan bacaan)
+    // Hanya tempahan dari awal bulan semasa (Asia/Kuala_Lumpur) dan akan datang
     const colRef = query(
       collection(db, BOOKINGS_COLLECTION),
-      where('date', '>=', getBookingCutoffDate())
+      where('date', '>=', cutoffDate)
     );
     
     return onSnapshot(colRef, (snapshot) => {
@@ -1191,16 +1188,41 @@ export function subscribeToBookings(onUpdate: (bookings: AdHocBooking[]) => void
       onUpdate(mergedWithPending);
     }, (error) => {
       reportSnapshotFallbackError(BOOKINGS_COLLECTION, error);
-      const local = getStoredAdHocBookings();
+      const local = getStoredAdHocBookings().filter((b) => Boolean(b?.date) && b.date >= cutoffDate);
       const mergedWithPending = mergeCloudBookingsWithPendingQueue(local);
       onUpdate(mergedWithPending);
     });
   } catch (err) {
     reportSnapshotFallbackError(BOOKINGS_COLLECTION, err);
-    const local = getStoredAdHocBookings();
+    const local = getStoredAdHocBookings().filter((b) => Boolean(b?.date) && b.date >= cutoffDate);
     const mergedWithPending = mergeCloudBookingsWithPendingQueue(local);
     onUpdate(mergedWithPending);
     return () => {};
+  }
+}
+
+/**
+ * On-demand read-only fetch of all historical bookings in Firestore (including previous months).
+ * Never mutates, deletes, or resets any booking records.
+ */
+export async function fetchAllBookingsHistoryOnce(): Promise<AdHocBooking[]> {
+  try {
+    const snap = await getDocs(collection(db, BOOKINGS_COLLECTION));
+    const bookings: AdHocBooking[] = [];
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as AdHocBooking;
+      if (data.id !== 'BK-2026-000101' && data.id !== 'BK-2026-000102' && data.id !== 'BK-2026-000103') {
+        bookings.push({
+          ...data,
+          syncStatus: data.syncStatus || 'synced'
+        });
+      }
+    });
+    bookings.sort((a, b) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
+    return mergeCloudBookingsWithPendingQueue(bookings);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.LIST, BOOKINGS_COLLECTION);
+    throw err;
   }
 }
 
