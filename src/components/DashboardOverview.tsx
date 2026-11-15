@@ -110,14 +110,14 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     <div className="space-y-4 animate-in fade-in duration-200">
       
       {/* 1. Compact Header Bar with Metrics */}
-      <div className="bg-slate-900 text-white rounded-xl p-4 sm:p-5 border border-slate-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center text-white shrink-0 shadow-sm">
-            <Building2 className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <h1 className="text-base sm:text-lg font-bold text-white tracking-tight leading-snug">
+      <div className="bg-slate-900 text-white rounded-xl p-3.5 sm:p-5 border border-slate-800 shadow-sm overflow-x-auto scrollbar-thin">
+        <div className="flex items-center justify-between gap-4 whitespace-nowrap min-w-max sm:min-w-0">
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center text-white shrink-0 shadow-sm">
+              <Building2 className="w-5 h-5" />
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <h1 className="text-base sm:text-lg font-bold text-white tracking-tight leading-snug shrink-0">
                 Pengurusan Ruang KPMBP
               </h1>
               <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-400/20 shrink-0">
@@ -125,47 +125,47 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
               </span>
             </div>
           </div>
-        </div>
 
-        {/* Balanced Equal-Width KPI Grid */}
-        <div className="w-full sm:w-auto sm:shrink-0 sm:min-w-[344px] md:min-w-[384px] lg:min-w-[420px] bg-slate-800/75 rounded-lg border border-slate-700/80 grid grid-cols-2 sm:grid-cols-4">
-          {/* KPI 1: RUANG */}
-          <div className="flex flex-col items-center justify-center text-center px-2.5 md:px-3 py-2.5 border-r border-b sm:border-b-0 border-slate-700/70 min-w-0">
-            <div className="text-base sm:text-lg font-bold text-white leading-none tabular-nums">
-              {totalRooms}
+          {/* Balanced Equal-Width KPI Grid */}
+          <div className="shrink-0 sm:min-w-[344px] md:min-w-[384px] lg:min-w-[420px] bg-slate-800/75 rounded-lg border border-slate-700/80 flex sm:grid sm:grid-cols-4">
+            {/* KPI 1: RUANG */}
+            <div className="flex flex-row sm:flex-col items-center justify-center gap-1.5 sm:gap-0 text-center px-3 py-2.5 border-r border-slate-700/70 min-w-0 whitespace-nowrap">
+              <div className="text-base sm:text-lg font-bold text-white leading-none tabular-nums">
+                {totalRooms}
+              </div>
+              <div className="text-[10px] text-slate-300 uppercase font-semibold tracking-wider leading-tight mt-0 sm:mt-1.5 whitespace-nowrap">
+                RUANG
+              </div>
             </div>
-            <div className="text-[10px] text-slate-300 uppercase font-semibold tracking-wider leading-tight mt-1.5 whitespace-nowrap">
-              RUANG
-            </div>
-          </div>
 
-          {/* KPI 2: TEMPAHAN (BULAN INI) */}
-          <div className="flex flex-col items-center justify-center text-center px-2.5 md:px-3 py-2.5 border-b sm:border-b-0 sm:border-r border-slate-700/70 min-w-0">
-            <div className="text-base sm:text-lg font-bold text-emerald-400 leading-none tabular-nums">
-              {monthlyConfirmedBookings.length}
+            {/* KPI 2: TEMPAHAN (BULAN INI) */}
+            <div className="flex flex-row sm:flex-col items-center justify-center gap-1.5 sm:gap-0 text-center px-3 py-2.5 border-r border-slate-700/70 min-w-0 whitespace-nowrap">
+              <div className="text-base sm:text-lg font-bold text-emerald-400 leading-none tabular-nums">
+                {monthlyConfirmedBookings.length}
+              </div>
+              <div className="text-[10px] text-slate-300 uppercase font-semibold tracking-wider leading-tight mt-0 sm:mt-1.5 whitespace-nowrap">
+                TEMPAHAN
+              </div>
             </div>
-            <div className="text-[10px] text-slate-300 uppercase font-semibold tracking-wider leading-tight mt-1.5 whitespace-nowrap">
-              TEMPAHAN
-            </div>
-          </div>
 
-          {/* KPI 3: KULIAH */}
-          <div className="flex flex-col items-center justify-center text-center px-2.5 md:px-3 py-2.5 border-r border-slate-700/70 min-w-0">
-            <div className="text-base sm:text-lg font-bold text-amber-400 leading-none tabular-nums">
-              {academicSchedule.length}
+            {/* KPI 3: KULIAH */}
+            <div className="flex flex-row sm:flex-col items-center justify-center gap-1.5 sm:gap-0 text-center px-3 py-2.5 border-r border-slate-700/70 min-w-0 whitespace-nowrap">
+              <div className="text-base sm:text-lg font-bold text-amber-400 leading-none tabular-nums">
+                {academicSchedule.length}
+              </div>
+              <div className="text-[10px] text-slate-300 uppercase font-semibold tracking-wider leading-tight mt-0 sm:mt-1.5 whitespace-nowrap">
+                KULIAH
+              </div>
             </div>
-            <div className="text-[10px] text-slate-300 uppercase font-semibold tracking-wider leading-tight mt-1.5 whitespace-nowrap">
-              KULIAH
-            </div>
-          </div>
 
-          {/* KPI 4: STAF RASMI */}
-          <div className="flex flex-col items-center justify-center text-center px-2.5 md:px-3 py-2.5 min-w-0">
-            <div className="text-base sm:text-lg font-bold text-blue-400 leading-none tabular-nums">
-              {totalStaff}
-            </div>
-            <div className="text-[10px] text-slate-300 uppercase font-semibold tracking-wider leading-tight mt-1.5 whitespace-nowrap">
-              STAF RASMI
+            {/* KPI 4: STAF RASMI */}
+            <div className="flex flex-row sm:flex-col items-center justify-center gap-1.5 sm:gap-0 text-center px-3 py-2.5 min-w-0 whitespace-nowrap">
+              <div className="text-base sm:text-lg font-bold text-blue-400 leading-none tabular-nums">
+                {totalStaff}
+              </div>
+              <div className="text-[10px] text-slate-300 uppercase font-semibold tracking-wider leading-tight mt-0 sm:mt-1.5 whitespace-nowrap">
+                STAF RASMI
+              </div>
             </div>
           </div>
         </div>
