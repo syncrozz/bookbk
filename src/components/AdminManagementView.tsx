@@ -87,6 +87,12 @@ import {
   downloadRoomsCSVTemplate, 
   parseRoomsCSV 
 } from '../utils/roomsCsvParser';
+import {
+  BLOCKS_CSV_HEADERS,
+  exportBlocksToCSV,
+  downloadBlocksCSVTemplate,
+  parseBlocksCSV
+} from '../utils/blocksCsvParser';
 import { formatLevel, saveStoredStaffUsers } from '../utils/storage';
 
 interface AdminManagementViewProps {
@@ -109,6 +115,7 @@ interface AdminManagementViewProps {
   onBatchAddBlocks?: (blocks: Omit<InstitutionalBlock, 'id'>[]) => Promise<void> | void;
   onDeleteBlock?: (id: string) => Promise<void> | void;
   onDeleteBatchBlocks?: (batchIdOrIds: string[]) => Promise<void> | void;
+  onSyncBlocks?: (blocks: InstitutionalBlock[], mode: 'merge' | 'replace') => Promise<void> | void;
   onLogoutAdmin?: () => void;
   onSyncBookings?: (bookings: AdHocBooking[], mode?: 'merge' | 'replace') => Promise<void> | void;
   onNavigateTab?: (tab: any) => void;
@@ -136,6 +143,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   onBatchAddBlocks,
   onDeleteBlock,
   onDeleteBatchBlocks,
+  onSyncBlocks,
   onLogoutAdmin,
   onSyncBookings,
   onNavigateTab,
@@ -172,6 +180,16 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   const [blockSearchTerm, setBlockSearchTerm] = useState<string>('');
   const [blockFilterCategory, setBlockFilterCategory] = useState<'ALL' | 'EXAM' | 'INSTITUTIONAL' | 'MAINTENANCE'>('ALL');
   const [isRefreshingStaff, setIsRefreshingStaff] = useState<boolean>(false);
+  const [blockExportStatus, setBlockExportStatus] = useState<'idle' | 'exported' | 'empty'>('idle');
+  const blockCsvFileInputRef = useRef<HTMLInputElement>(null);
+  const [showBlockImportPanel, setShowBlockImportPanel] = useState<boolean>(false);
+  const [blockCsvFile, setBlockCsvFile] = useState<File | null>(null);
+  const [blockSyncMode, setBlockSyncMode] = useState<'merge' | 'replace'>('merge');
+  const [parsedBlocksList, setParsedBlocksList] = useState<InstitutionalBlock[]>([]);
+  const [blockParseErrors, setBlockParseErrors] = useState<string[]>([]);
+  const [blockParseWarnings, setBlockParseWarnings] = useState<string[]>([]);
+  const [isImportingBlocks, setIsImportingBlocks] = useState<boolean>(false);
+  const [isDraggingBlockCsv, setIsDraggingBlockCsv] = useState<boolean>(false);
 
   // Study Week Academic Exemptions State
   const [exemptionList, setExemptionList] = useState<AcademicExemption[]>(academicExemptions);
@@ -1015,6 +1033,105 @@ ST003,Pengajian Am,Cik Siti Sarah Binti Razak,Pensyarah,013-5558899,siti.sarah@k
     }
   };
 
+  // Export current institutional & exam blocks to CSV
+  const handleExportInstitutionalBlocksCSV = () => {
+    if (!institutionalBlocks || institutionalBlocks.length === 0) {
+      setBlockExportStatus('empty');
+      setTimeout(() => setBlockExportStatus('idle'), 2500);
+      return;
+    }
+
+    const res = exportBlocksToCSV(institutionalBlocks, rooms);
+    if (res.success) {
+      setBlockExportStatus('exported');
+      setBlockSuccessMsg(`✅ Berjaya mengeksport ${res.count} rekod sekatan ruang ke ${res.filename}.`);
+      setTimeout(() => setBlockExportStatus('idle'), 2500);
+    }
+  };
+
+  // Download sample blocks CSV template
+  const handleDownloadBlocksCSVTemplate = () => {
+    downloadBlocksCSVTemplate(rooms);
+    setBlockSuccessMsg('📥 Templat CSV Sekatan Ruang berjaya dimuat turun.');
+  };
+
+  // Process uploaded or dropped blocks CSV file
+  const processBlocksCsvFile = (file: File) => {
+    setShowBlockImportPanel(true);
+    setBlockCsvFile(file);
+    setBlockParseErrors([]);
+    setBlockParseWarnings([]);
+    setBlockSuccessMsg(null);
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      if (!text) {
+        setBlockParseErrors(['Fail CSV kosong atau tidak dapat dibaca.']);
+        setParsedBlocksList([]);
+        return;
+      }
+      const result = parseBlocksCSV(text, rooms);
+      setParsedBlocksList(result.blocks);
+      setBlockParseErrors(result.errors);
+      setBlockParseWarnings(result.warnings);
+    };
+    reader.onerror = () => {
+      setBlockParseErrors(['Ralat semasa membaca fail CSV sekatan.']);
+      setParsedBlocksList([]);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleBlockCsvFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processBlocksCsvFile(file);
+    }
+    e.target.value = '';
+  };
+
+  const handleBlockCsvDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingBlockCsv(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      processBlocksCsvFile(file);
+    }
+  };
+
+  const handleConfirmImportBlocks = async () => {
+    if (parsedBlocksList.length === 0) return;
+
+    setIsImportingBlocks(true);
+    try {
+      if (onSyncBlocks) {
+        await onSyncBlocks(parsedBlocksList, blockSyncMode);
+      } else if (onBatchAddBlocks) {
+        await onBatchAddBlocks(parsedBlocksList.map(({ id: _id, ...rest }) => rest));
+      }
+      setBlockSuccessMsg(
+        `✅ Berjaya mengimport ${parsedBlocksList.length} rekod sekatan ruang ke Cloud Firestore (${blockSyncMode === 'replace' ? 'Mod Ganti Semua' : 'Mod Tambah / Kemas Kini'}).`
+      );
+      setParsedBlocksList([]);
+      setBlockCsvFile(null);
+      setBlockParseErrors([]);
+      setBlockParseWarnings([]);
+      setShowBlockImportPanel(false);
+    } catch (err: any) {
+      setBlockParseErrors([err?.message || 'Ralat semasa menyimpan rekod sekatan ke Cloud Firestore.']);
+    } finally {
+      setIsImportingBlocks(false);
+    }
+  };
+
+  const handleResetBlockImport = () => {
+    setBlockCsvFile(null);
+    setParsedBlocksList([]);
+    setBlockParseErrors([]);
+    setBlockParseWarnings([]);
+  };
+
   // Download sample rooms CSV template
   const handleDownloadRoomsCSVTemplate = () => {
     downloadRoomsCSVTemplate();
@@ -1715,6 +1832,21 @@ ST003,Pengajian Am,Cik Siti Sarah Binti Razak,Pensyarah,013-5558899,siti.sarah@k
               <span className="text-slate-400 block font-medium">Sekatan Peperiksaan &amp; Institusi:</span>
               <strong className="text-xl font-bold text-rose-400">{institutionalBlocks.length} Sekatan Ruang</strong>
             </div>
+            <button
+              type="button"
+              onClick={handleExportInstitutionalBlocksCSV}
+              className="mt-2 w-full bg-rose-700 hover:bg-rose-600 text-white font-bold py-1.5 px-2.5 rounded-lg text-[11px] transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+              title="Muat turun data sekatan peperiksaan & institusi semasa ke fail CSV"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>
+                {blockExportStatus === 'exported'
+                  ? 'CSV Sekatan Dieksport'
+                  : blockExportStatus === 'empty'
+                  ? 'Tiada Sekatan Ruang'
+                  : 'Eksport CSV Sekatan Ruang'}
+              </span>
+            </button>
           </div>
         </div>
       </div>
@@ -3157,9 +3289,248 @@ ST003,Pengajian Am,Cik Siti Sarah Binti Razak,Pensyarah,013-5558899,siti.sarah@k
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <input
+              ref={blockCsvFileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              onChange={handleBlockCsvFileChange}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={handleExportInstitutionalBlocksCSV}
+              className="bg-slate-50 hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-bold py-2 px-3 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+              title="Eksport semua rekod sekatan ruang semasa ke fail CSV"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-rose-600" />
+              <span>
+                {blockExportStatus === 'exported'
+                  ? 'Dieksport!'
+                  : blockExportStatus === 'empty'
+                  ? 'Tiada Rekod'
+                  : 'Eksport CSV'}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={handleDownloadBlocksCSVTemplate}
+              className="bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 text-xs font-bold py-2 px-3 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+              title="Muat turun templat fail CSV piawai untuk sekatan ruang"
+            >
+              <Download className="w-3.5 h-3.5 text-rose-600" />
+              <span>Templat CSV</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowBlockImportPanel((prev) => !prev)}
+              className={`text-xs font-bold py-2 px-3.5 rounded-xl transition flex items-center gap-1.5 shadow-sm cursor-pointer ${
+                showBlockImportPanel
+                  ? 'bg-slate-800 hover:bg-slate-900 text-white'
+                  : 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-600/20'
+              }`}
+              title="Buka panel untuk tarik atau import fail CSV sekatan ruang"
+            >
+              <UploadCloud className="w-4 h-4" />
+              <span>{showBlockImportPanel ? 'Tutup Panel Import' : 'Import CSV Sekatan'}</span>
+            </button>
           </div>
         </div>
+
+        {/* CSV IMPORT & SYNC PANEL FOR INSTITUTIONAL BLOCKS */}
+        {(showBlockImportPanel || parsedBlocksList.length > 0 || blockParseErrors.length > 0) && (
+          <div className="bg-rose-50/40 border border-rose-200 rounded-2xl p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-rose-200/70 pb-3">
+              <div>
+                <h4 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                  <UploadCloud className="w-4 h-4 text-rose-600" />
+                  <span>Import / Tarik Data CSV Sekatan Ruang</span>
+                </h4>
+                <p className="text-[11px] text-slate-600 mt-0.5">
+                  Muat naik fail CSV (sama format dengan fail Eksport CSV / Templat CSV) untuk mengunci banyak ruang sekaligus.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  handleResetBlockImport();
+                  setShowBlockImportPanel(false);
+                }}
+                className="text-xs font-bold text-slate-500 hover:text-slate-800 px-2 py-1 rounded-lg hover:bg-white transition cursor-pointer self-start sm:self-auto"
+              >
+                Tutup
+              </button>
+            </div>
+
+            {/* Header Guide */}
+            <div className="bg-slate-900 text-rose-200 p-2.5 rounded-xl font-mono text-[10.5px] overflow-x-auto border border-slate-800">
+              {BLOCKS_CSV_HEADERS.join(',')}
+            </div>
+
+            {/* Sync Mode Selector */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div
+                onClick={() => setBlockSyncMode('merge')}
+                className={`p-3 rounded-xl border-2 cursor-pointer transition ${
+                  blockSyncMode === 'merge'
+                    ? 'bg-white border-rose-500 shadow-xs'
+                    : 'bg-white/60 border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <label className="flex items-center gap-2 font-bold text-slate-900 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="blockSyncMode"
+                    checked={blockSyncMode === 'merge'}
+                    onChange={() => setBlockSyncMode('merge')}
+                    className="text-rose-600 focus:ring-rose-500"
+                  />
+                  <span>Tambah / Kemas Kini (Merge)</span>
+                </label>
+                <p className="text-[11px] text-slate-500 mt-1 pl-5">
+                  Menambah sekatan baharu dan mengemas kini rekod dengan ID yang sama tanpa memadam sekatan sedia ada.
+                </p>
+              </div>
+
+              <div
+                onClick={() => setBlockSyncMode('replace')}
+                className={`p-3 rounded-xl border-2 cursor-pointer transition ${
+                  blockSyncMode === 'replace'
+                    ? 'bg-amber-50 border-amber-500 shadow-xs'
+                    : 'bg-white/60 border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <label className="flex items-center gap-2 font-bold text-slate-900 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="blockSyncMode"
+                    checked={blockSyncMode === 'replace'}
+                    onChange={() => setBlockSyncMode('replace')}
+                    className="text-amber-600 focus:ring-amber-500"
+                  />
+                  <span>Ganti Semua (Replace)</span>
+                </label>
+                <p className="text-[11px] text-slate-500 mt-1 pl-5">
+                  Menggantikan keseluruhan {institutionalBlocks.length} sekatan sedia ada dengan kandungan fail CSV ini.
+                </p>
+              </div>
+            </div>
+
+            {/* Drag-and-Drop / File Trigger Box */}
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDraggingBlockCsv(true);
+              }}
+              onDragLeave={() => setIsDraggingBlockCsv(false)}
+              onDrop={handleBlockCsvDrop}
+              onClick={() => blockCsvFileInputRef.current?.click()}
+              className={`border-2 border-dashed rounded-xl p-5 text-center transition cursor-pointer ${
+                isDraggingBlockCsv
+                  ? 'border-rose-500 bg-rose-100/70'
+                  : 'border-rose-300 bg-white hover:border-rose-400 hover:bg-rose-50/40'
+              }`}
+            >
+              <UploadCloud className="w-7 h-7 text-rose-500 mx-auto mb-1.5" />
+              <div className="text-xs font-bold text-slate-800">
+                {blockCsvFile ? `Fail dipilih: ${blockCsvFile.name}` : 'Klik di sini atau Tarik & Lepaskan Fail CSV Sekatan (.csv)'}
+              </div>
+              <div className="text-[11px] text-slate-500 mt-1">
+                Menyokong format tarikh <code>YYYY-MM-DD</code> atau <code>DD/MM/YYYY</code> (Excel) serta pengekodan UTF-8.
+              </div>
+            </div>
+
+            {/* Parse Errors */}
+            {blockParseErrors.length > 0 && (
+              <div className="p-3 bg-rose-100 border border-rose-300 rounded-xl text-xs text-rose-900 space-y-1">
+                <div className="font-bold flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 text-rose-700 shrink-0" />
+                  <span>Ralat pembacaan CSV ({blockParseErrors.length}):</span>
+                </div>
+                <ul className="list-disc list-inside text-[11px] space-y-0.5 max-h-28 overflow-y-auto">
+                  {blockParseErrors.map((err, idx) => (
+                    <li key={idx}>{err}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Parse Warnings */}
+            {blockParseWarnings.length > 0 && (
+              <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-900 space-y-1">
+                <div className="font-bold flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Amaran Semakan Ruang ({blockParseWarnings.length}):</span>
+                </div>
+                <ul className="list-disc list-inside text-[11px] space-y-0.5 max-h-24 overflow-y-auto">
+                  {blockParseWarnings.map((w, idx) => (
+                    <li key={idx}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Parsed Preview & Confirm Action */}
+            {parsedBlocksList.length > 0 && (
+              <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <span className="text-xs font-extrabold text-slate-900">
+                    Pratonton Sekatan Sedia Diimport ({parsedBlocksList.length} rekod)
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleResetBlockImport}
+                      className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isImportingBlocks}
+                      onClick={handleConfirmImportBlocks}
+                      className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>
+                        {isImportingBlocks
+                          ? 'Mengimport ke Cloud...'
+                          : `Sahkan & Import ${parsedBlocksList.length} Sekatan ke Cloud`}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-lg">
+                  <table className="w-full text-left text-[11px] divide-y divide-slate-200">
+                    <thead className="bg-slate-50 text-slate-700 font-bold sticky top-0">
+                      <tr>
+                        <th className="p-2">Kod Ruang</th>
+                        <th className="p-2">Tajuk Sekatan</th>
+                        <th className="p-2">Kategori</th>
+                        <th className="p-2">Tarikh</th>
+                        <th className="p-2">Waktu</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {parsedBlocksList.slice(0, 50).map((b, idx) => (
+                        <tr key={b.id + idx}>
+                          <td className="p-2 font-bold text-slate-900">{b.roomId}</td>
+                          <td className="p-2 text-slate-800">{b.title}</td>
+                          <td className="p-2 font-mono">{b.category}</td>
+                          <td className="p-2 font-mono">
+                            {b.endDate && b.endDate !== b.date ? `${b.date} → ${b.endDate}` : b.date}
+                          </td>
+                          <td className="p-2 font-mono">{b.startTime}–{b.endTime}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* FEEDBACK SUCCESS MESSAGE */}
         {blockSuccessMsg && (

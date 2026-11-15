@@ -3,8 +3,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { initializeApp as initAdminApp, getApps as getAdminApps, cert } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
-import { INITIAL_STAFF_DATA } from '../data/staffData';
-import { StaffUser } from '../types';
+import { INITIAL_STAFF_DATA } from '../data/staffData.ts';
+import type { StaffUser } from '../types.ts';
 
 /**
  * Standard scrypt configuration for server-side PIN key derivation

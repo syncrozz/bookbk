@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'url';
-import { serverAuthVault, createStaffFirebaseCustomToken } from './src/server/auth-service';
+import { serverAuthVault, createStaffFirebaseCustomToken } from './src/server/auth-service.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

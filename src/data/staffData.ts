@@ -1,4 +1,4 @@
-import { StaffUser } from '../types';
+import type { StaffUser } from '../types.ts';
 
 export const INITIAL_STAFF_DATA: StaffUser[] = [
   {

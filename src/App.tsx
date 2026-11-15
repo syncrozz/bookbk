@@ -735,6 +735,45 @@ export default function App() {
     showToast(`🔓 Sekatan Ruang telah dinyahkunci.`);
   };
 
+  const handleSyncBlocks = async (
+    importedBlocks: InstitutionalBlock[],
+    mode: 'merge' | 'replace' = 'merge'
+  ) => {
+    let nextBlocks: InstitutionalBlock[] = [];
+    let idsToDelete: string[] = [];
+
+    if (mode === 'replace') {
+      const importedIds = new Set(importedBlocks.map((b) => b.id));
+      idsToDelete = institutionalBlocks.filter((b) => !importedIds.has(b.id)).map((b) => b.id);
+      nextBlocks = [...importedBlocks];
+    } else {
+      const mergedMap = new Map<string, InstitutionalBlock>();
+      for (const b of institutionalBlocks) {
+        mergedMap.set(b.id, b);
+      }
+      for (const b of importedBlocks) {
+        mergedMap.set(b.id, b);
+      }
+      nextBlocks = Array.from(mergedMap.values());
+    }
+
+    setInstitutionalBlocks(nextBlocks);
+    saveStoredInstitutionalBlocks(nextBlocks);
+
+    try {
+      if (mode === 'replace' && idsToDelete.length > 0) {
+        await bulkDeleteBlocksFromCloud(idsToDelete);
+      }
+      if (importedBlocks.length > 0) {
+        await bulkSaveBlocksToCloud(importedBlocks);
+      }
+    } catch (err) {
+      console.error('Cloud sync error on CSV blocks import:', err);
+    }
+
+    showToast(`🔒 ${importedBlocks.length} Sekatan Ruang berjaya diimport & disegerakkan (${mode === 'replace' ? 'Ganti Semua' : 'Tambah / Kemas Kini'}).`);
+  };
+
   // Staff sync (Supports 'merge' and 'replace' mode)
   const handleSyncStaffUsers = async (
     newStaffList: StaffUser[],
@@ -1175,6 +1214,7 @@ export default function App() {
               onBatchAddBlocks={handleBatchAddBlocks}
               onDeleteBlock={handleDeleteBlock}
               onDeleteBatchBlocks={handleDeleteBatchBlocks}
+              onSyncBlocks={handleSyncBlocks}
               onLogoutAdmin={handleLogoutAdmin}
               onSyncBookings={handleSyncBookings}
               onNavigateTab={handleSelectTab}
