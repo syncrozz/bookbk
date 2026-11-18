@@ -42,7 +42,7 @@ import {
   fetchAllBookingsHistoryOnce
 } from '../lib/firebase';
 import { getStoredRooms } from '../utils/storage';
-import { ensureBookbkPrefix } from '../utils/downloadHelper';
+import { ensureBookbkPrefix, triggerFileDownload } from '../utils/downloadHelper';
 import { WhatsAppIcon } from './WhatsAppIcon';
 import { 
   ShieldCheck, 
@@ -181,6 +181,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   const [blockFilterCategory, setBlockFilterCategory] = useState<'ALL' | 'EXAM' | 'INSTITUTIONAL' | 'MAINTENANCE'>('ALL');
   const [isRefreshingStaff, setIsRefreshingStaff] = useState<boolean>(false);
   const [blockExportStatus, setBlockExportStatus] = useState<'idle' | 'exported' | 'empty'>('idle');
+  const [scheduleExportStatus, setScheduleExportStatus] = useState<'idle' | 'exported' | 'empty'>('idle');
   const blockCsvFileInputRef = useRef<HTMLInputElement>(null);
   const [showBlockImportPanel, setShowBlockImportPanel] = useState<boolean>(false);
   const [blockCsvFile, setBlockCsvFile] = useState<File | null>(null);
@@ -849,18 +850,16 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   // Export current active schedule to standard grid CSV
   const handleExportCurrentScheduleCSV = () => {
     if (!academicSchedule || academicSchedule.length === 0) {
-      alert('Tiada slot jadual waktu semasa untuk dieksport.');
+      setScheduleExportStatus('empty');
+      setTimeout(() => setScheduleExportStatus('idle'), 2500);
       return;
     }
-    const csvContent = exportTimetableToStandardGridCSV(academicSchedule, rooms, { includeNightSlots: true });
+    const csvContent = '\uFEFF' + exportTimetableToStandardGridCSV(academicSchedule, rooms, { includeNightSlots: true });
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', ensureBookbkPrefix(`kpmbp_jadual_rasmi_terkini_${new Date().toISOString().slice(0, 10)}.csv`));
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const filename = ensureBookbkPrefix(`kpmbp_jadual_rasmi_terkini_${new Date().toISOString().slice(0, 10)}.csv`);
+    triggerFileDownload(blob, filename);
+    setScheduleExportStatus('exported');
+    setTimeout(() => setScheduleExportStatus('idle'), 2500);
   };
 
   // Timetable CSV File Handler with Auto-Sync to Firebase
@@ -1823,9 +1822,21 @@ ST003,Pengajian Am,Cik Siti Sarah Binti Razak,Pensyarah,013-5558899,siti.sarah@k
               <span className="text-slate-400 block font-medium">Jadual Akademik Aktif:</span>
               <strong className="text-xl font-bold text-blue-400">{academicSchedule.length} Slot Terkunci</strong>
             </div>
-            <div className="mt-2 py-1 text-[11px] text-slate-300 font-medium">
-              Sesi Rasmi Kolej
-            </div>
+            <button
+              type="button"
+              onClick={handleExportCurrentScheduleCSV}
+              className="mt-2 w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-1.5 px-2.5 rounded-lg text-[11px] transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+              title="Muat turun data jadual akademik aktif semasa ke fail CSV"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>
+                {scheduleExportStatus === 'exported'
+                  ? 'CSV Jadual Dieksport'
+                  : scheduleExportStatus === 'empty'
+                  ? 'Tiada Slot Jadual'
+                  : 'Eksport CSV Jadual'}
+              </span>
+            </button>
           </div>
           <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700/80 flex flex-col justify-between">
             <div>

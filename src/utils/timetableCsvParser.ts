@@ -588,43 +588,54 @@ export function exportTimetableToStandardGridCSV(
   const onlyRoomsWithSlots = options?.onlyRoomsWithSlots ?? false;
   const targetRoomIds = options?.targetRoomIds;
 
-  const headers = [
-    'Perkara',
-    'Hari',
-    '"1\n8:30 - 9:30"',
-    '"2\n9:30 - 10:30"',
-    '"3\n10:30 - 11:30"',
-    '"4\n11:30 - 12:30"',
-    '"5\n12:30 - 13:30"',
-    '"LUNCH\n13:30 - 14:30"',
-    '"6\n14:30 - 15:30"',
-    '"7\n15:30 - 16:30"',
-    '"8\n16:30 - 17:30"'
+  const escapeCsvCell = (raw: string): string => {
+    if (raw.includes(',') || raw.includes('"') || raw.includes('\n') || raw.includes('\r')) {
+      return `"${raw.replace(/"/g, '""')}"`;
+    }
+    return raw;
+  };
+
+  const normKey = (val?: string): string => (val || '').trim().toUpperCase();
+
+  const slotCols: { start: string; end: string; header: string }[] = [
+    { start: '08:30', end: '09:30', header: '"1\n8:30 - 9:30"' },
+    { start: '09:30', end: '10:30', header: '"2\n9:30 - 10:30"' },
+    { start: '10:30', end: '11:30', header: '"3\n10:30 - 11:30"' },
+    { start: '11:30', end: '12:30', header: '"4\n11:30 - 12:30"' },
+    { start: '12:30', end: '13:30', header: '"5\n12:30 - 13:30"' },
+    { start: '13:30', end: '14:30', header: '"LUNCH\n13:30 - 14:30"' },
+    { start: '14:30', end: '15:30', header: '"6\n14:30 - 15:30"' },
+    { start: '15:30', end: '16:30', header: '"7\n15:30 - 16:30"' },
+    { start: '16:30', end: '17:30', header: '"8\n16:30 - 17:30"' },
+    { start: '17:30', end: '18:30', header: '"9\n17:30 - 18:30"' },
   ];
 
   if (includeNightSlots) {
-    headers.push('"MALAM 1\n20:00 - 21:00"');
-    headers.push('"MALAM 2\n21:00 - 22:00"');
-    headers.push('"MALAM 3\n22:00 - 23:00"');
+    slotCols.push(
+      { start: '20:00', end: '21:00', header: '"MALAM 1\n20:00 - 21:00"' },
+      { start: '21:00', end: '22:00', header: '"MALAM 2\n21:00 - 22:00"' },
+      { start: '22:00', end: '23:00', header: '"MALAM 3\n22:00 - 23:00"' }
+    );
   }
 
-  const slotTimes = [
-    { start: '08:30', end: '09:30' },
-    { start: '09:30', end: '10:30' },
-    { start: '10:30', end: '11:30' },
-    { start: '11:30', end: '12:30' },
-    { start: '12:30', end: '13:30' },
-    { start: '13:30', end: '14:30' },
-    { start: '14:30', end: '15:30' },
-    { start: '15:30', end: '16:30' },
-    { start: '16:30', end: '17:30' }
-  ];
-
-  if (includeNightSlots) {
-    slotTimes.push({ start: '20:00', end: '21:00' });
-    slotTimes.push({ start: '21:00', end: '22:00' });
-    slotTimes.push({ start: '22:00', end: '23:00' });
+  // Dynamically include any non-standard active start times so no slot is ever omitted
+  const existingStarts = new Set(slotCols.map(c => c.start));
+  const extraSlots = new Map<string, string>();
+  for (const s of schedule) {
+    const start = formatTimeStr(s.startTime || '');
+    if (start && !existingStarts.has(start) && !extraSlots.has(start)) {
+      const end = formatTimeStr(s.endTime || '') || start;
+      extraSlots.set(start, end);
+    }
   }
+  if (extraSlots.size > 0) {
+    for (const [start, end] of extraSlots.entries()) {
+      slotCols.push({ start, end, header: `"${start} - ${end}"` });
+    }
+    slotCols.sort((a, b) => a.start.localeCompare(b.start));
+  }
+
+  const headers = ['Perkara', 'Hari', ...slotCols.map(c => c.header)];
 
   const days: { malay: DayOfWeek; code: string }[] = [
     { malay: 'Isnin', code: 'MON' },
@@ -634,41 +645,90 @@ export function exportTimetableToStandardGridCSV(
     { malay: 'Jumaat', code: 'FRI' }
   ];
 
-  // Filter rooms
-  let selectedRooms = rooms;
-  if (targetRoomIds && targetRoomIds.length > 0) {
-    selectedRooms = rooms.filter(r => targetRoomIds.includes(r.id) || targetRoomIds.includes(r.code));
-  } else if (onlyRoomsWithSlots) {
-    selectedRooms = rooms.filter(r => schedule.some(s => s.roomId === r.id || s.roomId === r.code));
+  if (schedule.some(s => s.dayOfWeek === 'Sabtu')) {
+    days.push({ malay: 'Sabtu', code: 'SAT' });
   }
+  if (schedule.some(s => s.dayOfWeek === 'Ahad')) {
+    days.push({ malay: 'Ahad', code: 'SUN' });
+  }
+
+  // Build room list (case-insensitive matching + preserve any roomId present in schedule)
+  const roomMatchesSlot = (room: { id: string; code: string }, slotRoomId: string): boolean => {
+    const target = normKey(slotRoomId);
+    return target !== '' && (target === normKey(room.id) || target === normKey(room.code));
+  };
+
+  let selectedRooms: { id: string; code: string }[] = rooms.map(r => ({ id: r.id, code: r.code || r.id }));
+  const extraRoomIds: string[] = [];
+  for (const s of schedule) {
+    const sRoom = (s.roomId || '').trim();
+    if (!sRoom) continue;
+    const known = selectedRooms.some(r => roomMatchesSlot(r, sRoom));
+    if (!known && !extraRoomIds.some(id => normKey(id) === normKey(sRoom))) {
+      extraRoomIds.push(sRoom);
+    }
+  }
+  for (const extraId of extraRoomIds) {
+    selectedRooms.push({ id: extraId, code: extraId });
+  }
+
+  if (targetRoomIds && targetRoomIds.length > 0) {
+    const targetSet = new Set(targetRoomIds.map(normKey));
+    selectedRooms = selectedRooms.filter(r => targetSet.has(normKey(r.id)) || targetSet.has(normKey(r.code)));
+  } else if (onlyRoomsWithSlots) {
+    selectedRooms = selectedRooms.filter(r => schedule.some(s => roomMatchesSlot(r, s.roomId)));
+  }
+
+  const formatSlotCell = (slot: AcademicScheduleSlot): string => {
+    const courseCode = (slot.courseCode || '').trim();
+    const className = (slot.className || '').trim();
+    const lecturerName = (slot.lecturerName || '').trim();
+    const remark = (slot.remark || '').trim();
+    const hasRealLecturer = lecturerName !== '' && lecturerName !== 'Pensyarah KPMBP';
+    const isGenericCode =
+      courseCode === '' ||
+      courseCode === 'AKADEMIK' ||
+      courseCode === 'LOCKED' ||
+      courseCode === 'TERKUNCI';
+
+    let val = '';
+    if (!isGenericCode && courseCode !== 'KULIAH') {
+      val = [courseCode, className, hasRealLecturer ? lecturerName : ''].filter(Boolean).join(' ').trim();
+    } else if (courseCode === 'KULIAH' && className) {
+      val = [className, hasRealLecturer ? lecturerName : ''].filter(Boolean).join(' ').trim();
+    } else if (remark) {
+      val = remark;
+    } else if (hasRealLecturer) {
+      val = lecturerName;
+    } else if (className) {
+      val = className;
+    } else {
+      val = (slot.courseName || '').trim() || 'LOCKED';
+    }
+
+    if (remark && !val.toLowerCase().includes(remark.toLowerCase())) {
+      val = `${val} (${remark})`;
+    }
+
+    return val;
+  };
 
   const rows: string[] = [headers.join(',')];
 
   for (const room of selectedRooms) {
     for (const day of days) {
-      const cellValues: string[] = [room.code, day.code];
+      const cellValues: string[] = [escapeCsvCell(room.code), day.code];
 
-      for (const slot of slotTimes) {
-        const matched = schedule.find(s => 
-          (s.roomId === room.id || s.roomId === room.code) &&
+      for (const slot of slotCols) {
+        const matchedSlots = schedule.filter(s =>
+          roomMatchesSlot(room, s.roomId) &&
           s.dayOfWeek === day.malay &&
-          s.startTime === slot.start
+          formatTimeStr(s.startTime || '') === slot.start
         );
 
-        if (matched) {
-          let val = '';
-          if (matched.lecturerName && matched.lecturerName !== 'Pensyarah KPMBP') {
-            val = matched.lecturerName;
-          } else if (matched.courseCode && matched.courseCode !== 'AKADEMIK' && matched.courseCode !== 'LOCKED' && matched.courseCode !== 'TERKUNCI') {
-            val = `${matched.courseCode} ${matched.className || ''}`.trim();
-          } else {
-            val = matched.courseName || 'LOCKED';
-          }
-
-          if (val.includes(',') || val.includes('"') || val.includes('\n')) {
-            val = `"${val.replace(/"/g, '""')}"`;
-          }
-          cellValues.push(val);
+        if (matchedSlots.length > 0) {
+          const val = matchedSlots.map(formatSlotCell).filter(Boolean).join(' / ');
+          cellValues.push(escapeCsvCell(val));
         } else {
           cellValues.push('');
         }
