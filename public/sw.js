@@ -7,7 +7,7 @@
  * deployment lifecycle. Never caches /version.json or dynamic API calls.
  */
 
-const CACHE_NAME = 'bookbk-kpmbp-shell-v2';
+const CACHE_NAME = 'bookbk-kpmbp-shell-v3';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
